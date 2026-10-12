@@ -1,54 +1,54 @@
 """
 真实 Sentinel-2 NDVI（数值，非颜色反演）。
-- STAC 检索 AOI 内低云 L2A 场景；用 tifffile + HTTP Range 读 COG 概览层窗口；
+- STAC 检索 AOI 内低云 L2A 场景；用 tifffile + requests(连接复用) 读 COG 概览层窗口；
 - 手动 UTM(51N) 坐标换算定位 AOI；计算 NDVI=(NIR-Red)/(NIR+Red) 均值。
-输出 data/processed/s2_ndvi.json
-依赖：tifffile（纯 python）。网络：需可访问 sentinel-cogs S3（国内可设代理）。
+输出 data/processed/s2_ndvi.json（逐景即时写盘）
+依赖：tifffile, requests。网络：需可访问 sentinel-cogs S3（国内可设代理 HTTPS_PROXY）。
 """
 import json
 import math
 import os
 import time
-import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import numpy as np
+import requests
 import tifffile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROC = os.path.join(ROOT, "data", "processed")
-
 AOI = (120.085, 30.204, 120.106, 30.226)  # lon0,lat0,lon1,lat1
 UA = {"User-Agent": "TeaWindow/1.0"}
 PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or "http://127.0.0.1:10090"
+
+SESSION = requests.Session()
+SESSION.headers.update(UA)
 if PROXY:
-    urllib.request.install_opener(urllib.request.build_opener(
-        urllib.request.ProxyHandler({"http": PROXY, "https": PROXY})))
-
-
-def http(req, tries=6):
-    last = None
-    for i in range(tries):
-        try:
-            return urllib.request.urlopen(req, timeout=90).read()
-        except Exception as e:  # noqa: BLE001
-            last = e
-            time.sleep(2 + 2 * i)
-    raise last
+    SESSION.proxies = {"http": PROXY, "https": PROXY}
+try:
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    _retry = Retry(total=6, connect=6, read=6, backoff_factor=1.5,
+                   status_forcelist=[429, 500, 502, 503, 504],
+                   allowed_methods=["GET", "HEAD", "POST"])
+    SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=4, pool_maxsize=8))
+except Exception:  # noqa: BLE001
+    pass
 
 
 class RangeFile:
     def __init__(self, url):
         self.url = url
         self.pos = 0
-        self.size = int(urllib.request.urlopen(
-            urllib.request.Request(url, method="HEAD", headers=UA), timeout=60).headers["Content-Length"])
+        self.size = int(SESSION.head(url, timeout=60).headers["Content-Length"])
 
     def read(self, n=-1):
         end = self.size - 1 if (n is None or n < 0) else min(self.size - 1, self.pos + n - 1)
         if self.pos > end:
             return b""
-        d = http(urllib.request.Request(self.url, headers={**UA, "Range": f"bytes={self.pos}-{end}"}))
+        r = SESSION.get(self.url, headers={"Range": f"bytes={self.pos}-{end}"}, timeout=90)
+        r.raise_for_status()
+        d = r.content
         self.pos += len(d)
         return d
 
@@ -89,10 +89,9 @@ def stac_scenes(start, end):
     body = {"bbox": list(AOI), "datetime": f"{start}T00:00:00Z/{end}T00:00:00Z",
             "collections": ["sentinel-2-l2a"], "limit": 80,
             "query": {"eo:cloud_cover": {"lt": 25}}}
-    req = urllib.request.Request("https://earth-search.aws.element84.com/v1/search",
-                                 data=json.dumps(body).encode(),
-                                 headers={**UA, "Content-Type": "application/json"})
-    return json.loads(http(req))["features"]
+    r = SESSION.post("https://earth-search.aws.element84.com/v1/search", json=body, timeout=60)
+    r.raise_for_status()
+    return r.json()["features"]
 
 
 def pick_level(tf, target=700):
@@ -106,7 +105,6 @@ def pick_level(tf, target=700):
 
 
 def _transform(tf):
-    """取全分辨率页的地理变换(像素尺度+左上角)。"""
     base = tf.pages[0]
     sx, sy, _ = base.tags["ModelPixelScaleTag"].value
     tp = base.tags["ModelTiepointTag"].value
@@ -121,7 +119,6 @@ def ndvi_for_scene(red_href, nir_href):
     lr, ln = pick_level(tf_r), pick_level(tf_n)
     ar = tf_r.series[0].levels[lr].asarray().astype("float32")
     an = tf_n.series[0].levels[ln].asarray().astype("float32")
-    # 概览层像素尺度 = 全分辨率尺度 × 缩放因子
     sxr, syr = sxr0 * (w_r0 / ar.shape[1]), syr0 * (w_r0 / ar.shape[1])
     sxn, syn = sxn0 * (w_n0 / an.shape[1]), syn0 * (w_n0 / an.shape[1])
     zone = 51
@@ -151,31 +148,40 @@ def main():
     end = date.today()
     start = end - timedelta(days=400)
     feats = stac_scenes(start.isoformat(), end.isoformat())
-    print("候选场景:", len(feats))
-    # 按日期分组，取每日最低云量场景
+    print("候选场景:", len(feats), flush=True)
     per_day = {}
     for ft in feats:
         d = ft["properties"]["datetime"][:10]
         cc = ft["properties"].get("eo:cloud_cover", 100)
         if d not in per_day or cc < per_day[d][0]:
             per_day[d] = (cc, ft)
-    series = []
     days = sorted(per_day)
-    if len(days) > 6:  # 均匀采样约 6 期，控制耗时
-        idx = np.linspace(0, len(days) - 1, 6).round().astype(int)
+    if len(days) > 8:
+        idx = np.linspace(0, len(days) - 1, 8).round().astype(int)
         days = [days[i] for i in dict.fromkeys(idx)]
     outp = os.path.join(PROC, "s2_ndvi.json")
+    # 载入已有结果，避免重复
+    series = []
+    if os.path.exists(outp):
+        try:
+            series = json.load(open(outp, encoding="utf-8")).get("series", [])
+        except Exception:  # noqa: BLE001
+            series = []
+    have = {s["date"] for s in series}
 
     def save():
         with open(outp, "w", encoding="utf-8") as f:
-            json.dump({"source": "Copernicus Sentinel-2 L2A（10m，读取约 160m 概览层，数值 NDVI）",
+            json.dump({"source": "Copernicus Sentinel-2 L2A（10m，读取约160m概览层，数值 NDVI）",
                        "aoi": {"lon0": AOI[0], "lat0": AOI[1], "lon1": AOI[2], "lat1": AOI[3]},
-                       "series": series,
-                       "note": "数值 NDVI，非颜色反演；云量<25 的最佳场景；逐景即时写盘。"},
+                       "series": sorted(series, key=lambda x: x["date"]),
+                       "note": "数值 NDVI，非颜色反演；云量<25 最佳场景；逐景即时写盘。"},
                       f, ensure_ascii=False, indent=2)
 
-    print("采样日期:", days, flush=True)
+    print("采样日期:", days, "已有:", sorted(have), flush=True)
     for d in days:
+        if d in have:
+            print(f"  跳过 {d}（已有）", flush=True)
+            continue
         cc, ft = per_day[d]
         try:
             print(f"  处理 {d} ...", flush=True)
@@ -185,9 +191,10 @@ def main():
                 print(f"  {d} ndvi={v:.3f} cloud={cc:.0f} {ft['id'][:22]}", flush=True)
                 save()
         except Exception as e:  # noqa: BLE001
-            print(f"  {d} ERR {str(e)[:70]}", flush=True)
+            print(f"  {d} ERR {str(e)[:80]}", flush=True)
+        time.sleep(1)
     save()
-    print(f"有效点数={len(series)} -> data/processed/s2_ndvi.json")
+    print(f"有效点数={len(series)} -> data/processed/s2_ndvi.json", flush=True)
 
 
 if __name__ == "__main__":

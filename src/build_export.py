@@ -118,6 +118,11 @@ def main():
         with open(ep, encoding="utf-8") as f:
             ens = json.load(f)
     ensmap = {s["date"]: s for s in ens["series"]} if ens else {}
+    s2 = None
+    sp = os.path.join(PROC, "s2_ndvi.json")
+    if os.path.exists(sp):
+        with open(sp, encoding="utf-8") as f:
+            s2 = json.load(f)
 
     days = []
     for r in recs(recent, "history") + recs(fc_e, "forecast"):
@@ -145,6 +150,7 @@ def main():
         },
         "metrics": metrics,
         "ndvi": ndvi,
+        "s2_ndvi": s2,
         "terrain": terrain,
         "calibration": calib,
         "ensemble": ens,

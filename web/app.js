@@ -91,16 +91,19 @@
   });
 
   const ns = D.ndvi.series || [];
+  const s2 = (D.s2_ndvi && D.s2_ndvi.series) || [];
   new Chart(document.getElementById("chartNdvi"), {
     type: "line",
     data: { labels: ns.map(s => md(s.date)), datasets: [
-      { label: "NDVI(近似)", data: ns.map(s => s.ndvi), borderColor: "#3fb950", backgroundColor: "rgba(63,185,80,.15)", fill: true, tension: .35, pointRadius: 2 }] },
+      { label: "MODIS NDVI(近似)", data: ns.map(s => s.ndvi), borderColor: "#3fb950", backgroundColor: "rgba(63,185,80,.15)", fill: true, tension: .35, pointRadius: 2 },
+      { label: "Sentinel-2 NDVI(数值)", data: ns.map(s => { const h = s2.find(x => x.date === s.date); return h ? h.ndvi : null; }),
+        showLine: false, pointRadius: 6, pointStyle: "rectRot", backgroundColor: "#4aa8ff" }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: "#cfe0ee" } } },
       scales: { y: { min: -0.2, max: 1, ticks: { color: "#8aa0b2" }, grid: { color: "#26343f" } },
                 x: { ticks: { color: "#8aa0b2", maxTicksLimit: 12 }, grid: { color: "#1d2b37" } } } }
   });
   document.getElementById("ndvi-note").textContent =
-    `共 ${ns.length} 个真实 MODIS NDVI 8天合成点；Sentinel-2 可用场景 ${(D.ndvi.sentinel2_scenes || []).length} 景。${D.ndvi.caveat}`;
+    `共 ${ns.length} 个真实 MODIS NDVI 8天合成点；另有 ${s2.length} 个 Sentinel-2 数值 NDVI 样本（蓝色方点，非颜色反演）。${D.ndvi.caveat}`;
 
   /* ---------------- 地块地形 ---------------- */
   if (D.terrain && D.terrain.plots) {

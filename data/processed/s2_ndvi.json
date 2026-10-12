@@ -1,5 +1,5 @@
 {
-  "source": "Copernicus Sentinel-2 L2A（10m，读取约 160m 概览层，数值 NDVI）",
+  "source": "Copernicus Sentinel-2 L2A（10m，读取约160m概览层，数值 NDVI）",
   "aoi": {
     "lon0": 120.085,
     "lat0": 30.204,
@@ -12,7 +12,25 @@
       "ndvi": 0.759,
       "cloud": 12.3,
       "tile": "S2C_51RTP_20250914_0"
+    },
+    {
+      "date": "2025-11-13",
+      "ndvi": 0.541,
+      "cloud": 24.9,
+      "tile": "S2C_51RTP_20251113_0"
+    },
+    {
+      "date": "2026-01-02",
+      "ndvi": 0.296,
+      "cloud": 14.5,
+      "tile": "S2C_51RTP_20260102_0"
+    },
+    {
+      "date": "2026-07-16",
+      "ndvi": 0.813,
+      "cloud": 17.3,
+      "tile": "S2B_51RTP_20260716_0"
     }
   ],
-  "note": "数值 NDVI，非颜色反演；云量<25 的最佳场景；逐景即时写盘。"
+  "note": "数值 NDVI，非颜色反演；云量<25 最佳场景；逐景即时写盘。"
 }
