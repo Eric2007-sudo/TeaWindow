@@ -10,7 +10,10 @@ authors:
   - name: "TeaWindow Team"
     affiliation: "AI4Climate Global Youth Climate Solutions Challenge (Track 01)"
 year: 2026
+version: "1.3.0"
+date-released: "2026-10-12"
 license: MIT
+# doi: "10.5281/zenodo.xxxxxxx"   # 归档后填入（见 deploy/ZENODO_GUIDE.md）
 repository-code: "https://github.com/Eric2007-sudo/TeaWindow"
 url: "https://teawindow.onrender.com"
 keywords:

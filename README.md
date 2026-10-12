@@ -54,6 +54,7 @@ TeaWindow/
 │  ├─ sensor_ingest.py   # 接入外部/自建传感器 CSV → 计算指标
 │  ├─ indices.py         # 农业气象指标引擎
 │  ├─ fetch_ndvi.py      # MODIS NDVI(真实,颜色反演) + Sentinel-2 场景清单
+│  ├─ fetch_s2_ndvi.py   # 真实 Sentinel-2 数值 NDVI（COG 概览窗口读取；需网络可达 S3）
 │  ├─ terrain.py         # 地块级地形（Open-Meteo DEM）→ 霜冻易感
 │  ├─ model.py           # numpy GBDT 复合风险模型 + 逐年前推验证
 │  ├─ calibrate.py       # 概率校准(Platt)+bootstrap 置信区间
@@ -69,7 +70,7 @@ TeaWindow/
 ├─ research/             # 调研：一手数据方案/证据台账/信息公开/合作/自建传感器
 ├─ deploy/               # Dockerfile · Procfile · render.yaml · 上线清单
 ├─ .github/workflows/    # pages.yml · refresh.yml · test.yml
-└─ web/ index.html app.js data.js chart.umd.min.js demo.html(demo_assets/)   # 仪表盘 + 自播放演示
+└─ web/ index.html app.js data.js chart.umd.min.js demo.html(demo_assets/) links.html(QR)   # 仪表盘 + 演示 + 分享页
 ```
 
 ## 4. 快速开始

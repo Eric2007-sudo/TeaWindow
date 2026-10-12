@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeaWindow 分享入口 · 扫码访问</title>
+<style>
+  :root{--bg:#0b1219;--panel:#16212b;--fg:#e8eef3;--muted:#8aa0b2;--line:#243444;--accent:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;min-height:100vh}
+  .wrap{max-width:960px;margin:0 auto;padding:32px 20px 60px}
+  h1{font-size:24px;margin:0 0 6px} h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;text-align:center}
+  .card h2{font-size:15px;margin:0 0 4px}
+  .card p{color:var(--muted);font-size:12.5px;margin:2px 0 14px}
+  .card img{width:190px;height:190px;background:#fff;border-radius:10px;padding:8px}
+  .card a{display:block;margin-top:12px;color:var(--accent);text-decoration:none;word-break:break-all;font-size:13px}
+  .pill{display:inline-block;background:#0f1a24;border:1px solid var(--line);border-radius:999px;padding:4px 12px;color:#bcd0de;font-size:12px;margin:2px 4px}
+  .foot{color:var(--muted);font-size:12px;margin-top:26px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>梅坞采候 <span>TeaWindow</span> · 分享入口</h1>
+  <div class="sub">梅家坞龙井 43 号「倒春寒 × 高温」复合风险预警与采摘窗口决策助手 · AI4Climate 赛道 01</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>实时服务（推荐）</h2>
+      <p>FastAPI · 每日 06:00 自动刷新 · DeepSeek 建议</p>
+      <img src="qr_render.png" alt="Render QR">
+      <a href="https://teawindow.onrender.com" target="_blank" rel="noopener">https://teawindow.onrender.com</a>
+    </div>
+    <div class="card">
+      <h2>静态仪表盘（离线可跑）</h2>
+      <p>GitHub Pages · 双击/扫码即开</p>
+      <img src="qr_pages.png" alt="Pages QR">
+      <a href="https://eric2007-sudo.github.io/TeaWindow/" target="_blank" rel="noopener">https://eric2007-sudo.github.io/TeaWindow/</a>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="pill"><a href="https://github.com/Eric2007-sudo/TeaWindow" style="color:#bcd0de;text-decoration:none">代码仓库 github.com/Eric2007-sudo/TeaWindow</a></span>
+    <span class="pill"><a href="../web/demo.html" style="color:#bcd0de;text-decoration:none">自播放演示 demo.html</a></span>
+    <span class="pill">代码 MIT · 数据/文档 CC BY 4.0</span>
+    <div style="margin-top:10px">提示：Render 免费层闲置会休眠，首次访问约 30 秒唤醒。</div>
+  </div>
+</div>
+</body>
+</html>

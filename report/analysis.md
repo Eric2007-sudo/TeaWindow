@@ -127,6 +127,9 @@
 - 用 NASA GIBS WMS 拉取 AOI 的 MODIS NDVI 8 天合成影像（真实数据，76 个时点），
   经**官方图例颜色→NDVI 近似反演**得到植被活力序列（`figures/fig_ndvi_temp.png`）。
 - 同时通过 STAC 列出 AOI 内 **Sentinel-2 L2A** 真实场景（云量<40%），作为更高分辨率能力的接入点。
+- **真实数值 S2 NDVI 模块**（`src/fetch_s2_ndvi.py`）：用 `tifffile` + HTTP Range 读取 S2 L2A COG 概览层窗口，
+  经 UTM 换算定位 AOI，计算数值 NDVI（非颜色反演）。本机经代理不稳定，已成功取得真实样本（如 2025-09-14 NDVI≈0.76）；
+  完整时序需稳定网络，主时序仍采用 MODIS（GIBS，76 点）。
 - **局限**：颜色反演为近似值；MODIS 空间分辨率较粗；受 GIBS 缓存时间范围限制。已在界面与报告注明。
 
 ---
