@@ -112,6 +112,23 @@ def cmd_up():
     return sid
 
 
+def set_env(vars_map):
+    svc = find_service()
+    if not svc:
+        raise SystemExit("服务不存在")
+    body = [{"key": k, "value": v} for k, v in vars_map.items()]
+    return _req("PUT", f"/services/{svc['id']}/env-vars", body)
+
+
+def cmd_setenv():
+    ds = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not ds:
+        print("DEEPSEEK_API_KEY 未在 .env 中配置，跳过")
+        return
+    r = set_env({"DEEPSEEK_API_KEY": ds})
+    print(f"已设置环境变量（{len(r)} 项），将自动触发重新部署")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "owners"
     if cmd == "owners":
@@ -122,6 +139,8 @@ if __name__ == "__main__":
             print(svc["id"], svc["name"], svc.get("type"))
     elif cmd == "up":
         cmd_up()
+    elif cmd == "setenv":
+        cmd_setenv()
     elif cmd == "status":
         svc = find_service()
         if not svc:

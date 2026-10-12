@@ -49,9 +49,10 @@ Open-Meteo weather (history+forecast)     NASA GIBS / Sentinel-2
 - Model: pure-numpy GBDT (no scikit-learn/torch). Calibration (Platt) + bootstrap AUC CI.
 
 ## 6. Deliverables
+- **Live service**: https://teawindow.onrender.com (FastAPI, daily 06:00 auto-refresh)
+- **Static dashboard (offline-capable)**: https://eric2007-sudo.github.io/TeaWindow/
 - Offline single-page dashboard (`web/index.html`) — double-click to run.
-- FastAPI live service (`src/serve.py`) with daily 06:00 refresh.
-- Open-source code (`src/`), AI analysis report (`report/analysis.md`), and figures.
+- Open-source code: https://github.com/Eric2007-sudo/TeaWindow · AI analysis report (`report/analysis.md`) and figures.
 
 ## 7. Ethics & safety
 Framed as **decision support**, not a replacement for official warnings/agronomy advice. We disclose that the model uses
