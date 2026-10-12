@@ -106,6 +106,7 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 | 用途 | 来源 |
 |---|---|
 | 气象（历史+预报） | Open-Meteo（ERA5 再分析 + 预报） |
+| **真实台站观测（一手）** | Meteostat 杭州站 WMO 58457（逐日观测） |
 | 植被活力 | NASA GIBS `MODIS_Terra_NDVI_8Day`（颜色近似反演） |
 | 高分辨率能力证明 | Element84 Earth Search `sentinel-2-l2a`（STAC 场景清单） |
 | 地块地形（DEM） | Open-Meteo Elevation（90m，海拔/坡度/坡向） |
