@@ -39,6 +39,13 @@ def run(do_fetch=True, do_ndvi=True, do_figs=False):
                 print(f"[pipeline] 遥感抓取失败，跳过：{e}")
     _step("indices", indices.main)
     _step("model", model.main)
+    # 可选：若有台站观测，做偏差订正（非破坏性，产出 daily_corrected.csv）
+    try:
+        if os.path.exists(os.path.join(ROOT, "data", "processed", "station_hangzhou.csv")):
+            import station_correct
+            _step("station_correct", station_correct.main)
+    except Exception as e:  # noqa: BLE001
+        print(f"[pipeline] 台站订正跳过：{e}")
     _step("build_export", build_export.main)
     if do_figs:
         import make_figs

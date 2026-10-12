@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software/data, please cite it as below."
+title: "TeaWindow: Meijiawu compound climate risk and picking-window assistant"
+abstract: >-
+  A decision-support prototype for Zhejiang Meijiawu (West Lake Longjing core area)
+  that fuses open weather, remote sensing and terrain to identify compound
+  frost/heat/drought risk for the early-budding Longjing-43 cultivar, recommend
+  picking windows, and generate farmer-facing advisories via an LLM.
+authors:
+  - name: "TeaWindow Team"
+    affiliation: "AI4Climate Global Youth Climate Solutions Challenge (Track 01)"
+year: 2026
+license: MIT
+repository-code: "https://github.com/Eric2007-sudo/TeaWindow"
+url: "https://teawindow.onrender.com"
+keywords:
+  - climate risk
+  - tea
+  - Longjing
+  - Meijiawu
+  - remote sensing
+  - machine learning
+  - decision support

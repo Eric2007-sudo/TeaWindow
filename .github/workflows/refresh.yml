@@ -1,0 +1,20 @@
+name: Daily refresh (external cron)
+
+# 解决 Render 免费层休眠导致内置 apscheduler 不触发的问题：
+# 由 GitHub Actions 每日定时调用线上 /api/refresh，并顺带保活。
+on:
+  schedule:
+    - cron: "0 22 * * *"   # 22:00 UTC = 06:00 Asia/Shanghai
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger refresh & keep-alive
+        run: |
+          echo "== wake up / refresh =="
+          curl -sS -m 180 -X POST "https://teawindow.onrender.com/api/refresh" || true
+          echo ""
+          echo "== health =="
+          curl -sS -m 180 "https://teawindow.onrender.com/api/health" || true

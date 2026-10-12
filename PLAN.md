@@ -38,3 +38,13 @@ deploy/              # Dockerfile · Procfile · render.yaml
 - 本地 `uvicorn src.serve:app --reload` 起服务，各接口 `curl` 正常；
 - 前端在线模式读 API、离线模式读 `data.js`，两者均无报错；
 - 指标与截图刷新；`run_all.ps1` 一键可复现。
+
+## 已完成（第二轮）
+- [x] **#8 台站偏差订正**：`src/station_correct.py` → `daily_corrected.csv`、`report/station_correction.md`
+- [x] **A1 外部定时刷新**：`.github/workflows/refresh.yml`（每日 06:00 CST 调 `/api/refresh`）
+- [x] **A2 单元测试+CI**：`tests/` + `.github/workflows/test.yml`（本地 5 passed）
+- [x] **A3 许可+规范**：`LICENSE`(MIT)、`LICENSE-DATA.md`(CC BY 4.0)、`CITATION.cff`、仓库描述/话题
+- [x] **B4 自播放演示**：`web/demo.html`（自动巡览+字幕）
+- [x] **D9 商业模式**：`submit/06_商业模式.md`（含联网调研的定价锚点与来源）
+- [x] **D10 Release**：`v1.3`（附 `TeaWindow_v1.3.zip`）
+- [x] 在线服务：https://teawindow.onrender.com ｜ 静态：https://eric2007-sudo.github.io/TeaWindow/

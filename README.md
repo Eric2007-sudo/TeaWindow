@@ -45,26 +45,31 @@ Open-Meteo 气象(历史+预报)          NASA GIBS / Sentinel-2 遥感
 
 ```
 TeaWindow/
-├─ README.md · PLAN.md · requirements.txt · .env.example · run_all.ps1
+├─ README.md · PLAN.md · LICENSE(MIT) · LICENSE-DATA(CC BY 4.0) · CITATION.cff
+├─ requirements.txt · .env.example · run_all.ps1
 ├─ src/
 │  ├─ fetch_weather.py   # 抓取 Open-Meteo 历史(2015+)+16天预报
+│  ├─ fetch_station.py   # Meteostat 杭州站真实观测（一手观测）+ 交叉验证
+│  ├─ station_correct.py # 用台站观测对 ERA5 做逐月偏差订正
+│  ├─ sensor_ingest.py   # 接入外部/自建传感器 CSV → 计算指标
 │  ├─ indices.py         # 农业气象指标引擎
 │  ├─ fetch_ndvi.py      # MODIS NDVI(真实,颜色反演) + Sentinel-2 场景清单
 │  ├─ terrain.py         # 地块级地形（Open-Meteo DEM）→ 霜冻易感
 │  ├─ model.py           # numpy GBDT 复合风险模型 + 逐年前推验证
 │  ├─ calibrate.py       # 概率校准(Platt)+bootstrap 置信区间
 │  ├─ ensemble.py        # 集合预报 → 霜冻/高温概率与温度分位
+│  ├─ backtest_events.py # 真实事件回测（事件级）
 │  ├─ llm_advice.py      # DeepSeek 白话建议（带规则后备）
-│  ├─ pipeline.py        # 一键管线
-│  ├─ serve.py           # FastAPI 服务 + 每日定时刷新
-│  ├─ build_export.py    # 汇总导出 web/data.json & data.js
-│  └─ make_figs.py       # 生成报告图表
+│  ├─ pipeline.py · serve.py · build_export.py · make_figs.py · make_qr.py · deploy_render.py
+├─ tests/                # pytest 单元测试
 ├─ data/ raw · processed # 原始与处理后数据
 ├─ models/               # metrics.json · calibration.json
 ├─ report/ analysis.md   # AI 模型与分析报告 + figures/
-├─ submit/               # 提交三件套 + 路演稿 + 截图 + 英文版
-├─ deploy/               # Dockerfile · Procfile · render.yaml
-└─ web/ index.html app.js data.js chart.umd.min.js   # 离线/在线仪表盘
+├─ submit/               # 提交三件套 + 路演稿 + 商业模式 + 截图 + 英文版
+├─ research/             # 调研：一手数据方案/证据台账/信息公开/合作/自建传感器
+├─ deploy/               # Dockerfile · Procfile · render.yaml · 上线清单
+├─ .github/workflows/    # pages.yml · refresh.yml · test.yml
+└─ web/ index.html app.js data.js chart.umd.min.js demo.html(demo_assets/)   # 仪表盘 + 自播放演示
 ```
 
 ## 4. 快速开始
@@ -119,3 +124,12 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 
 本原型为**决策辅助**，输出存在不确定性，**不替代**田间实勘、农技指导与官方气象预警。
 涉及灾害预警时请以**杭州市气象局**等官方发布为准。详见 `report/analysis.md`。
+
+## 8. 自播放演示 / 打包 / 许可
+
+- **自播放演示页**（录屏用）：`web/demo.html`（自动巡览 + 字幕，空格暂停，←/→ 切换）
+- **一键打包**：`dist/TeaWindow_v1.3.zip`；**GitHub Release**：https://github.com/Eric2007-sudo/TeaWindow/releases/tag/v1.3
+- **测试与 CI**：`tests/`（pytest）、`.github/workflows/test.yml`
+- **外部定时刷新**：`.github/workflows/refresh.yml`（每日 06:00 CST 调用线上 `/api/refresh`）
+- **许可证**：代码 **MIT**（`LICENSE`）· 数据与文档 **CC BY 4.0**（`LICENSE-DATA.md`）
+- **引用**：见 `CITATION.cff`
