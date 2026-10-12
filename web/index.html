@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>梅坞采候 TeaWindow · 梅家坞龙井气候风险与采摘窗口</title>
+<style>
+  :root{--bg:#0f1720;--panel:#16212b;--panel2:#1d2b37;--fg:#e8eef3;--muted:#8aa0b2;
+        --line:#26343f;--green:#3fb950;--yellow:#d6b657;--orange:#e08a3c;--red:#e5534b;--accent:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;line-height:1.5}
+  header{padding:22px 26px 12px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:22px;letter-spacing:.5px}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-top:6px}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 22px 60px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{color:var(--muted);font-size:12px}
+  .card .v{font-size:26px;font-weight:700;margin-top:6px}
+  .card .s{color:var(--muted);font-size:12px;margin-top:6px}
+  .grid{display:grid;grid-template-columns:1fr;gap:16px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .panel h2{margin:0 0 10px;font-size:15px;color:#cfe0ee;font-weight:600}
+  .chartbox{position:relative;height:300px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;color:#08130c}
+  .b低{background:var(--green)}.b中{background:var(--yellow)}.b高{background:var(--orange)}.b极高{background:var(--red)}
+  .fc-row{background:#141f28}
+  .adv{color:#bcd0de;font-size:12.5px}
+  .meta{color:var(--muted);font-size:12px;margin-top:14px}
+  .pill{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+        padding:3px 10px;font-size:12px;color:#bcd0de;margin:2px 6px 2px 0}
+  .tag{font-size:11px;color:var(--muted)}
+  a{color:var(--accent)}
+  code{background:#0c141b;padding:1px 5px;border-radius:4px;font-size:12px}
+  .note{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap" style="padding-bottom:0">
+    <h1>梅坞采候 <span>TeaWindow</span></h1>
+    <div class="sub">梅家坞（西湖龙井核心产区）· 龙井 43 号「倒春寒 × 高温」复合风险预警与采摘窗口决策助手</div>
+    <div class="sub" id="hdr-meta"></div>
+  </div>
+</header>
+<div class="wrap">
+  <div class="cards" id="cards"></div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>复合风险与采摘适宜度（近 60 天 + 未来 16 天）</h2>
+      <div class="chartbox"><canvas id="chartRisk"></canvas></div>
+      <div class="note">风险度 0–1（越高越危险，右侧红区）；适宜度已换算为 0–1 便于对照。灰色区域为预报期。</div>
+    </div>
+
+    <div class="panel">
+      <h2>气温与霜冻 / 高温信号</h2>
+      <div class="chartbox"><canvas id="chartTemp"></canvas></div>
+      <div class="note">蓝点=霜冻日(Tmin≤2℃)，红点=高温日(Tmax≥35℃)，▲=倒春寒(前期偏暖后骤冷)。</div>
+    </div>
+
+    <div class="panel">
+      <h2>遥感植被活力（MODIS NDVI 近似反演）</h2>
+      <div class="chartbox" style="height:240px"><canvas id="chartNdvi"></canvas></div>
+      <div class="note" id="ndvi-note"></div>
+    </div>
+
+    <div class="panel">
+      <h2>地块级地形与霜冻易感（Open-Meteo DEM 采样）</h2>
+      <div style="overflow:auto">
+      <table id="plotTable">
+        <thead><tr><th>地块</th><th>海拔(m)</th><th>坡度</th><th>坡向</th><th>霜冻易感</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="note" id="terrain-note"></div>
+    </div>
+
+    <div class="panel">
+      <h2>未来 16 天预报与行动建议</h2>
+      <div style="overflow:auto">
+      <table id="fcTable">
+        <thead><tr><th>日期</th><th>风险</th><th>适宜度</th><th>Tmax/Tmin</th><th>降水</th><th>霜冻/高温概率</th><th>白话建议</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>AI 模型说明与效果（对比单阈值基线）</h2>
+      <div id="metrics"></div>
+    </div>
+
+    <div class="panel">
+      <h2>数据来源、方法与免责声明</h2>
+      <div id="sources" class="note"></div>
+    </div>
+  </div>
+  <div class="meta" id="foot"></div>
+</div>
+<script src="chart.umd.min.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

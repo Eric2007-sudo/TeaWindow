@@ -1,0 +1,1 @@
+{"model": "gbdt", "f0": -2.6012201774650237, "lr": 0.08, "features": ["tmax", "tmin", "tmean", "precip", "rh", "et0", "rad", "sun", "wind", "soil", "gdd", "dry_run", "wet_run", "deficit", "precip10", "warm3", "tmin5", "sin_doy", "cos_doy", "i_frost_warm", "i_heat_deficit", "i_heat_drysoil", "is_spring", "is_summer"], "n_trees": 250}

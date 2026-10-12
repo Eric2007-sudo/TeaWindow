@@ -1,0 +1,11 @@
+# 密钥与本地配置（切勿提交）
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# 临时/大文件
+*.log
+dist/
+data/raw/

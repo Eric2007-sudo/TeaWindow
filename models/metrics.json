@@ -1,0 +1,39 @@
+{
+  "model": "gradient_boosting_trees (numpy, depth=3, n=250, lr=0.08)",
+  "label": "弱标签：专家农艺规则复合风险 R>=0.5（倒春寒/高温/干旱 取最大）",
+  "train_years": "2015-2023",
+  "test_years": "2024-2025",
+  "ml": {
+    "auc": 0.9978,
+    "precision": 0.977,
+    "recall": 0.7589,
+    "f1": 0.8543,
+    "accuracy": 0.9714,
+    "n": 1014,
+    "n_pos": 112
+  },
+  "baseline_single_threshold(tmin<=2)": {
+    "auc": 0.7798,
+    "precision": 0.4,
+    "recall": 0.6607,
+    "f1": 0.4983,
+    "accuracy": 0.8531,
+    "n": 1014,
+    "n_pos": 112
+  },
+  "note": "标签由专家规则生成；模型学习多变量阈值与交互，并可用于预报前推。",
+  "permutation_importance_top": {
+    "dry_run": 0.2457,
+    "tmin": 0.2217,
+    "sin_doy": 0.0379,
+    "precip10": 0.0138,
+    "tmax": 0.0026,
+    "tmin5": 0.0006,
+    "warm3": 0.0004,
+    "et0": 0.0002,
+    "precip": 0.0,
+    "i_heat_deficit": -0.0,
+    "is_summer": 0.0,
+    "wind": -0.0001
+  }
+}
