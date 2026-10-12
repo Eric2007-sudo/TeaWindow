@@ -4,5 +4,9 @@ pandas>=2.0
 numpy>=1.24
 matplotlib>=3.7
 pillow>=10.0
+segno>=1.6
+fastapi>=0.110
+uvicorn>=0.27
+apscheduler>=3.10
 # 说明：核心模型为纯 numpy 梯度提升树，无需 scikit-learn / torch。
 # 后端 LLM 建议层可选调用 DeepSeek（见 .env.example）。
