@@ -89,7 +89,7 @@ def _refresh(do_fetch=True):
         return {"status": "busy"}
     try:
         import pipeline
-        pipeline.run(do_fetch=do_fetch, do_ndvi=do_fetch, do_figs=False)
+        pipeline.run(do_fetch=do_fetch, do_ndvi=do_fetch, do_figs=False, do_reports=False)
         _advice_cache.clear()
         return {"status": "ok"}
     finally:

@@ -23,7 +23,7 @@ def _step(name, fn):
     print(f"[pipeline] {name} 完成 ({time.time() - t:.1f}s)", flush=True)
 
 
-def run(do_fetch=True, do_ndvi=True, do_figs=False):
+def run(do_fetch=True, do_ndvi=True, do_figs=False, do_reports=True):
     import indices
     import model
     import build_export
@@ -54,13 +54,14 @@ def run(do_fetch=True, do_ndvi=True, do_figs=False):
             _step(mod, m.main)
         except Exception as e:  # noqa: BLE001
             print(f"[pipeline] {mod} 跳过：{e}")
-    # 分析类报告（无网络、较快）
-    for mod in ("counterfactual", "phenology", "model_compare", "recalibrate", "label_sensitivity"):
-        try:
-            m = __import__(mod)
-            _step(mod, m.main)
-        except Exception as e:  # noqa: BLE001
-            print(f"[pipeline] {mod} 跳过：{e}")
+    # 分析类报告（无网络、较快）——服务端轻量刷新可跳过
+    if do_reports:
+        for mod in ("counterfactual", "phenology", "model_compare", "recalibrate", "label_sensitivity"):
+            try:
+                m = __import__(mod)
+                _step(mod, m.main)
+            except Exception as e:  # noqa: BLE001
+                print(f"[pipeline] {mod} 跳过：{e}")
     if do_figs:
         import make_figs
         _step("make_figs", make_figs.main)
