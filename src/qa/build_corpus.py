@@ -131,10 +131,11 @@ def main():
             rec = {"text": q, "intent": intent}
             (ev if rng.random() < 0.2 else train).append(rec)
     # 增广：同义替换 + 称呼/语气前后缀 + 轻度字符噪声
-    prefixes = ["", "师傅，", "请问", "想问问，", "帮我看下，", "麻烦问下，"]
-    suffixes = ["", "呢", "吗", "啊", "？"]
-    syn = {"霜冻": ["下霜", "打霜"], "高温": ["大热天", "酷热"], "采摘": ["采茶", "开采"],
-           "地块": ["茶园", "地"], "灌溉": ["浇水"], "保险": ["保费"], "损失": ["亏"]}
+    prefixes = ["", "师傅，", "请问", "想问问，", "帮我看下，", "麻烦问下，", "请教下，", "老板，"]
+    suffixes = ["", "呢", "吗", "啊", "？", "呀", "，谢谢"]
+    syn = {"霜冻": ["下霜", "打霜", "冻害"], "高温": ["大热天", "酷热", "热害"], "采摘": ["采茶", "开采", "摘茶"],
+           "地块": ["茶园", "地", "山场"], "灌溉": ["浇水", "灌水"], "保险": ["保费", "投保"],
+           "损失": ["亏", "赔", "亏本"], "寒潮": ["冷空气", "倒春寒"]}
 
     def augment(text):
         t = text
@@ -142,13 +143,13 @@ def main():
             if k in t and rng.random() < 0.5:
                 t = t.replace(k, rng.choice(vs))
         t = rng.choice(prefixes) + t + rng.choice(suffixes)
-        if rng.random() < 0.3 and len(t) > 4:
+        if rng.random() < 0.35 and len(t) > 4:
             i = rng.randrange(len(t)); t = t[:i] + t[i + 1:]
         return t
 
     aug = []
     for rec in list(train):
-        for _ in range(3):
+        for _ in range(6):
             aug.append({"text": augment(rec["text"]), "intent": rec["intent"]})
     train += aug
     rng.shuffle(train); rng.shuffle(ev)

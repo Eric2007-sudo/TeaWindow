@@ -270,6 +270,46 @@ def fallback(ctx, q, detail):
             ["自研问答引擎"])
 
 
+def day_advice(d):
+    """按单日结构化结果生成结论先行的建议（与适宜度/风险严格一致，用于替换 LLM 日报）。"""
+    concl = []
+    dsh, heat = d.get("cold_shock"), d.get("heat")
+    dry = (d.get("dry_run") or 0) >= 5 or (d.get("deficit") or 0) >= 45
+    wet = (d.get("wet_run") or 0) >= 4 or (d.get("precip") or 0) >= 15
+    suit = d.get("suitability") or 0
+    tmin, tmax, precip = d.get("tmin"), d.get("tmax"), d.get("precip")
+    if d.get("frost") or dsh:
+        concl.append("防倒春寒/霜冻")
+    if heat:
+        concl.append("防高温")
+    if dry:
+        concl.append("防旱补水")
+    if wet:
+        concl.append("防连阴雨/排水")
+    if not concl:
+        if suit >= 40:
+            concl.append("适合采")
+        else:
+            concl.append("暂不宜采")
+    head = "、".join(concl) + "（" + f"风险{d.get('risk_level','-')}、适宜度{int(suit)}" + "）。"
+    acts = []
+    if d.get("frost") or dsh:
+        acts.append(f"Tmin {tmin}℃，夜晨覆盖/熏烟并抢采达标芽叶")
+    if heat:
+        acts.append(f"Tmax {tmax}℃，上遮阳网、傍晚浇透水")
+    if dry:
+        acts.append(f"连旱{d.get('dry_run',0)}天/亏缺{d.get('deficit')}，早晚浇透并覆盖保墒")
+    if wet:
+        acts.append(f"连雨{d.get('wet_run',0)}天/降水{precip}mm，清沟排水、鲜叶及时摊青")
+    if suit >= 40 and not (d.get("frost") or heat or dry or wet):
+        acts.append("按一芽一叶标准采，鲜叶及时摊放")
+    if not acts:
+        acts.append("按常规管护，关注最新预报")
+    text = head + " 建议：" + "；".join(acts) + "。"
+    text += "（决策辅助，以官方预警与实况为准）"
+    return text
+
+
 HANDLERS = {
     "frost": frost, "heat": heat, "drought": drought, "rain": rain,
     "pick_window": pick_window, "schedule": schedule, "decision": decision, "plot": plot,

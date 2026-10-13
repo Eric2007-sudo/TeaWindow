@@ -6,6 +6,7 @@
 """
 import json
 import os
+import datetime
 
 import numpy as np
 import pandas as pd
@@ -22,7 +23,8 @@ def main():
     web = os.path.join(ROOT, "web", "data.json")
     with open(web, encoding="utf-8") as f:
         data = json.load(f)
-    fc = [d for d in data["days"] if d["source"] == "forecast"][:7]
+    today = datetime.date.today().isoformat()
+    fc = [d for d in data["days"] if d["source"] == "forecast" and d["date"] >= today][:7]
 
     # 归一化
     u = np.array([p["frost_factor"] for p in plots], dtype=float)

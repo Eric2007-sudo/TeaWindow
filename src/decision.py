@@ -1,60 +1,66 @@
 """
-新颖点 N1：决策论建议（不确定性驱动）。
-用集合预报的灾害概率，对"抢采 / 等待 / 防护"计算期望效用，给出每日推荐动作。
-读取 web/data.json，注入 data["decision"]。
+决策论建议 + 统一采摘口径。
+- 期望效用：EV_pick/EV_protect/EV_wait（以采摘适宜度为"品质"，灾害概率为风险）。
+- 统一"最佳采摘日"：best_pick_day = argmax EV_pick，并回写 data["pick_window"]（同一目标）。
+读取并回写 web/data.json 的 data["decision"] 与 data["pick_window"]。
 """
 import json
 import os
+import datetime
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
 
-V = 100.0          # 一次理想采摘的相对价值
-LABOR = 6.0        # 采摘作业成本(相对)
-PROTECT_COST = 4.0 # 防护投入成本(相对)
-QUALITY_PER_DAY = 0.04  # 每延迟一天的品质/鲜爽损失
+V = 100.0
+LABOR = 6.0
+PROTECT_COST = 4.0
 
 
 def main():
     data = json.load(open(os.path.join(WEB, "data.json"), encoding="utf-8"))
-    fc = [d for d in data["days"] if d["source"] == "forecast"][:7]
+    today = datetime.date.today().isoformat()
+    fc = [d for d in data["days"] if d["source"] == "forecast" and d["date"] >= today][:16]
 
     def haz(d):
-        pf = d.get("p_frost") or 0.0
-        ph = d.get("p_heat") or 0.0
-        rr = d.get("risk_R") or 0.0
-        return max(pf, ph, rr * 0.6)  # 综合灾害概率（保守混合）
+        return max(d.get("p_frost") or 0.0, d.get("p_heat") or 0.0, (d.get("risk_R") or 0.0) * 0.6)
+
+    def qual(d):
+        return max(0.0, (d.get("suitability") or 0.0) / 100.0)
 
     ev_pick, ev_prot = [], []
-    for di, d in enumerate(fc):
-        q = max(0.0, 1 - QUALITY_PER_DAY * di)
-        p = haz(d)
+    for d in fc:
+        q, p = qual(d), haz(d)
         ev_pick.append(V * q * (1 - 0.6 * p) - LABOR)
         ev_prot.append(V * q * (1 - 0.2 * p) - LABOR - PROTECT_COST)
 
     days = []
-    for di, d in enumerate(fc):
-        future = ev_pick[di + 1:] or [ev_pick[di]]
-        ev_wait = max(future)
-        opts = {"抢采": ev_pick[di], "防护": ev_prot[di], "等待": ev_wait}
-        act = max(opts, key=opts.get)
+    for i, d in enumerate(fc):
+        ev_wait = max(ev_pick[i + 1:]) if i + 1 < len(ev_pick) else ev_pick[i]
+        opts = {"抢采": ev_pick[i], "防护": ev_prot[i], "等待": ev_wait}
+        act = max(opts, key=opts.get) if (d.get("suitability") or 0) >= 5 else "等待"
         days.append({"date": d["date"], "risk_level": str(d.get("risk_level", "")),
-                     "p_hazard": round(haz(d), 2),
-                     "ev_pick": round(ev_pick[di], 1), "ev_protect": round(ev_prot[di], 1),
+                     "p_hazard": round(haz(d), 2), "suitability": round(d.get("suitability") or 0),
+                     "ev_pick": round(ev_pick[i], 1), "ev_protect": round(ev_prot[i], 1),
                      "ev_wait": round(ev_wait, 1), "recommend": act})
 
-    best_i = int(max(range(len(fc)), key=lambda i: ev_pick[i])) if fc else None
-    out = {"V": V, "labor": LABOR, "protect_cost": PROTECT_COST, "quality_per_day": QUALITY_PER_DAY,
-           "method": "用集合灾害概率对'抢采/等待/防护'计算期望效用并取最大；延迟按日损失品质。",
-           "days": days,
-           "best_pick_day": (fc[best_i]["date"] if best_i is not None else None)}
-    data["decision"] = out
+    order = sorted(range(len(fc)), key=lambda i: -ev_pick[i])
+    best = fc[order[0]]["date"] if order else None
+    window = [{"date": fc[i]["date"], "ev_pick": round(ev_pick[i], 1),
+               "suitability": round(fc[i].get("suitability") or 0),
+               "risk_level": str(fc[i].get("risk_level", ""))} for i in order[:5]]
+
+    data["decision"] = {"V": V, "labor": LABOR, "protect_cost": PROTECT_COST,
+                        "objective": "EV_pick = 价值×适宜度×(1-0.6×灾害概率) − 作业成本；最佳日=EV_pick 最大者",
+                        "method": "以采摘适宜度为品质、集合灾害概率为风险，计算'抢采/等待/防护'期望效用并取最大。",
+                        "days": days, "best_pick_day": best}
+    data["pick_window"] = window
+    data["pick_window_note"] = "推荐采摘窗口与'最佳采摘日'使用同一目标(期望效用)，二者一致。"
     blob = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     open(os.path.join(WEB, "data.json"), "w", encoding="utf-8").write(blob)
     open(os.path.join(WEB, "data.js"), "w", encoding="utf-8").write("window.TW_DATA = " + blob + ";\n")
+    print("best_pick_day:", best, "== pick_window[0]:", window[0]["date"] if window else None)
     for d in days:
-        print(f"{d['date']} 灾害概率{d['p_hazard']} 抢采EV{d['ev_pick']} 防护EV{d['ev_protect']} 等待EV{d['ev_wait']} -> {d['recommend']}")
-    print("最佳采摘日:", out["best_pick_day"], "-> 注入 web/data.json")
+        print(f"  {d['date']} 适宜度{d['suitability']} 灾害概率{d['p_hazard']} 抢采EV{d['ev_pick']} -> {d['recommend']}")
 
 
 if __name__ == "__main__":

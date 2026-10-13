@@ -32,7 +32,8 @@
     { k: "未来 7 天最高风险", v: `<span class="badge b${maxRisk7.risk_level}">${maxRisk7.risk_level}</span>`,
       s: `${maxRisk7.date} · 风险度 ${(maxRisk7.risk_R).toFixed(2)}` },
     { k: "推荐采摘窗口", v: (win.date || "–").slice(5), s: `适宜度 ${fmt(win.suitability)} · 风险 ${win.risk_level || "–"}` },
-    { k: "模型 AUC（测试年）", v: (m.ml.auc).toFixed(3), s: `F1 ${m.ml.f1} · 基线 AUC ${m["baseline_single_threshold(tmin<=2)"].auc}` }
+    { k: "今日行动建议", v: (D.decision && D.decision.days && D.decision.days[0]) ? D.decision.days[0].recommend : "–",
+      s: `最佳采摘日 ${D.decision ? (D.decision.best_pick_day || "–") : "–"}` }
   ];
   document.getElementById("cards").innerHTML = cards.map(c =>
     `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="s">${c.s}</div></div>`).join("");
@@ -156,8 +157,8 @@
       <td>${r.year}</td><td>${r.frost_index}</td><td>${r.heat_index}</td>
       <td>${r.payout > 0 ? '<b>' + r.payout + '</b>' : '0'}</td></tr>`).join("");
     document.getElementById("ins-note").textContent =
-      `触发阈值：霜冻 ${D.insurance.frost_threshold} 度日 / 高温 ${D.insurance.heat_threshold} 天；` +
-      `历史赔付年 ${D.insurance.fire_years}/${D.insurance.n_years}；公平保费≈${D.insurance.fair_premium_per_mu} 元/亩。详见 report/index_insurance.md。`;
+      `【概念验证，非产品报价】触发阈值：霜冻 ${D.insurance.frost_threshold} 度日 / 高温 ${D.insurance.heat_threshold} 天；` +
+      `历史赔付年 ${D.insurance.fire_years}/${D.insurance.n_years}；公平保费≈${D.insurance.fair_premium_per_mu} 元/亩（与政策性补贴保费的保障范围/口径不同，不可直接比较）。详见 report/index_insurance.md。`;
   }
 
   /* ---------------- 预报表格 ---------------- */
@@ -174,6 +175,10 @@
 
   /* ---------------- 模型指标 ---------------- */
   document.getElementById("metrics").innerHTML = `
+    <div class="note" style="color:#e0b34c;margin-bottom:8px">
+      ⚠️ 下表为<b>弱标签复现指标</b>：标签由专家农艺规则生成，模型用相近特征预测这些标签，
+      AUC 高主要说明"能复现规则"，<b>不代表真实灾害预测准确率</b>；真实效果需田间验证。
+    </div>
     <div class="note">
       <b>模型</b>：${m.model}（弱标签监督：专家农艺规则生成复合风险标签）。<br>
       <b>训练</b>：${m.train_years}　<b>测试</b>：${m.test_years}。<br>

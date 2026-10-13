@@ -14,7 +14,7 @@ import pandas as pd
 SRC = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SRC)
 from model import build_features, rubric, GBDT  # noqa: E402
-import llm_advice  # noqa: E402
+from qa import nlg  # noqa: E402
 
 ROOT = os.path.dirname(SRC)
 PROC = os.path.join(ROOT, "data", "processed")
@@ -87,15 +87,12 @@ def main():
     fc_e, _ = enrich(fc, model=model, train=False)
 
     recent = hist_e.tail(180)
-    advice_days = pd.concat([recent.tail(14), fc_e])
 
-    advice_map = {}
-    for _, r in advice_days.iterrows():
-        ctx = llm_advice.ctx_from_row(r)
-        advice_map[str(r["date"])[:10]] = llm_advice.generate(ctx)
-
-    # 采摘窗口：未来 16 天按适宜度排序取前 5
-    win = fc_e.sort_values("suitability", ascending=False).head(5)
+    # 采摘窗口：未来(>=今天)按适宜度排序取前 5（仅作"适宜度视角"参考；最终以决策模块统一口径为准）
+    import datetime as _dt
+    _today = _dt.date.today()
+    fc_future = fc_e[fc_e["date"].dt.date >= _today]
+    win = fc_future.sort_values("suitability", ascending=False).head(5)
     window = [{"date": str(r["date"])[:10], "suitability": float(r["suitability"]),
                "risk_level": str(r["risk_level"])} for _, r in win.iterrows()]
 
@@ -127,8 +124,8 @@ def main():
     days = []
     for r in recs(recent, "history") + recs(fc_e, "forecast"):
         dt = r["date"]
-        r["advice"] = advice_map.get(dt, {}).get("text")
-        r["advice_source"] = advice_map.get(dt, {}).get("source")
+        r["advice"] = nlg.day_advice(r)
+        r["advice_source"] = "teawindow-own"
         if r["source"] == "forecast" and dt in ensmap:
             s = ensmap[dt]
             r["p_frost"] = s["p_frost"]
@@ -163,7 +160,7 @@ def main():
         f.write(blob)
     with open(os.path.join(WEB, "data.js"), "w", encoding="utf-8") as f:
         f.write("window.TW_DATA = " + blob + ";\n")
-    print(f"days={len(days)} (hist {len(recent)} + fc {len(fc_e)}), advice={len(advice_map)}")
+    print(f"days={len(days)} (hist {len(recent)} + fc {len(fc_e)}), advice=rules(自研)")
     print("pick_window:", window)
     print("-> web/data.json")
 

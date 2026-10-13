@@ -14,7 +14,8 @@ SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
 sys.path.insert(0, SRC)
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks  # noqa: E402
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request  # noqa: E402
+import time as _time  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -46,6 +47,41 @@ def _cur_day(days):
         return m[0]
     past = [d for d in days if d["date"] <= today]
     return past[-1] if past else days[-1]
+
+
+# ---- 简单限流 + 管理令牌（P0-2 / P1-2）----
+_RL = {}
+
+
+def _rate_limit(ip, limit=40, window=60):
+    now = _time.time()
+    arr = [t for t in _RL.get(ip, []) if now - t < window]
+    if len(arr) >= limit:
+        raise HTTPException(429, "rate limit exceeded, retry later")
+    arr.append(now)
+    _RL[ip] = arr
+
+
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
+
+def _require_admin(request):
+    tok = request.headers.get("X-Admin-Token") or request.query_params.get("token")
+    if not ADMIN_TOKEN or tok != ADMIN_TOKEN:
+        raise HTTPException(403, "forbidden: admin token required")
+
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "same-origin"
+    resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'")
+    return resp
 
 
 def _refresh(do_fetch=True):
@@ -159,22 +195,36 @@ class AskReq(BaseModel):
 
 
 def _ask(q, engine, history=None):
-    if engine == "llm":
-        r = llm_advice.chat(q, _context())
-        r.setdefault("engine", "deepseek-chat")
-        return r
     from qa import engine as qa_engine
-    return qa_engine.answer(q, _context(), history or [])
+    base = qa_engine.answer(q, _context(), history or [])
+    if engine == "llm":
+        # P0-1：LLM 只润色，数值/结论以规则为准，校验失败回退规则
+        rep = llm_advice.rephrase_keep_numbers(q, base["text"])
+        out = dict(base)
+        out["engine"] = "teawindow-own+llm"
+        out["source"] = rep["source"]
+        out["base_text"] = base["text"]
+        out["text"] = rep["text"]
+        return out
+    return base
 
 
 @app.post("/api/ask")
-def ask(req: AskReq):
-    return _ask(req.question, req.engine, req.history)
+def ask(request: Request, req: AskReq):
+    if req.engine not in ("own", "llm"):
+        raise HTTPException(422, "engine must be 'own' or 'llm'")
+    ip = request.client.host if request.client else "global"
+    _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
+    return _ask((req.question or "").strip()[:500], req.engine, req.history)
 
 
 @app.get("/api/ask")
-def ask_get(q: str, engine: str = "own"):
-    return _ask(q, engine, [])
+def ask_get(request: Request, q: str, engine: str = "own"):
+    if engine not in ("own", "llm"):
+        raise HTTPException(422, "engine must be 'own' or 'llm'")
+    ip = request.client.host if request.client else "global"
+    _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
+    return _ask((q or "").strip()[:500], engine, [])
 
 
 # ---- 众包物候上报（N4）----
@@ -188,12 +238,24 @@ class ReportReq(BaseModel):
     note: str = ""
 
 
+KINDS = {"开采", "倒春寒/霜冻", "高温灼伤", "连阴雨", "其他"}
+
+
 @app.post("/api/report")
-def report(req: ReportReq):
+def report(request: Request, req: ReportReq):
     import datetime as _dt
+    ip = request.client.host if request.client else "global"
+    _rate_limit(ip, limit=int(os.environ.get("REPORT_RPM", "10")))
+    if req.kind not in KINDS:
+        raise HTTPException(422, f"kind must be one of {sorted(KINDS)}")
+    try:
+        _dt.date.fromisoformat(req.date)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(422, "date must be YYYY-MM-DD")
+    rec = {"ts": _dt.datetime.now().isoformat(timespec="seconds"),
+           "date": req.date[:10], "plot": (req.plot or "")[:40],
+           "kind": req.kind, "note": (req.note or "")[:200]}
     os.makedirs(os.path.dirname(CROWD), exist_ok=True)
-    rec = {"ts": _dt.datetime.now().isoformat(timespec="seconds"), "date": req.date,
-           "plot": req.plot, "kind": req.kind, "note": req.note}
     with open(CROWD, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     n = sum(1 for _ in open(CROWD, encoding="utf-8"))
@@ -201,7 +263,8 @@ def report(req: ReportReq):
 
 
 @app.get("/api/reports")
-def reports():
+def reports(request: Request):
+    _require_admin(request)   # P1-2：上报内容默认不公开
     if not os.path.exists(CROWD):
         return {"count": 0, "items": []}
     items = [json.loads(l) for l in open(CROWD, encoding="utf-8") if l.strip()]
@@ -209,7 +272,8 @@ def reports():
 
 
 @app.post("/api/refresh")
-def refresh(background: BackgroundTasks, fetch: bool = True):
+def refresh(request: Request, background: BackgroundTasks, fetch: bool = True):
+    _require_admin(request)
     background.add_task(_refresh, fetch)
     return {"status": "scheduled", "fetch": fetch}
 

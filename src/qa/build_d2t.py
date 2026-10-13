@@ -219,7 +219,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     qb = qbank()
     samples = []
-    for _ in range(3600):
+    for _ in range(20000):
         it = rng.choice(list(SPEC.keys()))
         fgen, agen = SPEC[it]
         facts, need = fgen()

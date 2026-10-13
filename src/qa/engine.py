@@ -254,8 +254,30 @@ def compose(intent, q, sl, data):
             "chains": ["自研问答引擎"]}
 
 
+OFFTOPIC = ["药", "疼", "病", "感冒", "头疼", "股票", "基金", "彩票", "贷款", "汇率"]
+
+
+def _reply(text, intent="unknown", chain=None):
+    return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": 0.0,
+            "slots": {}, "detail": False, "follow_up": False, "text": text,
+            "chain": chain or ["自研问答引擎"]}
+
+
 def answer(question, context=None, history=None):
     data = _load_data()
+    q0 = (question or "").strip()
+    if not q0:
+        return _reply("请描述你的问题，例如：今天有风险吗、要不要防冻、先采哪块地、保险多少钱一亩。")
+    has_cjk = any("\u4e00" <= c <= "\u9fff" for c in q0)
+    if not has_cjk and any(c.isalpha() for c in q0):
+        return _reply("This assistant currently supports Chinese only. 请用中文提问，例如：今天有风险吗？")
+    if any(w in q0 for w in OFFTOPIC):
+        return _reply("抱歉，我只服务梅家坞茶园的气候风险与采摘决策（如：风险、防冻、灌溉、采摘、保险、开采期）。"
+                      "健康/金融等非农业问题请咨询专业人员。")
+    if (("温度" in q0 or "气温" in q0 or "降雨" in q0 or "降水" in q0)
+            and ("个月" in q0 or "季度" in q0 or "半年" in q0 or "一年" in q0)):
+        return _reply("我们只能给出 16 天逐日预报与逐月气候概率（历史统计），"
+                      "无法准确预测三个月后的逐日气温/降雨；更远的趋势请参考气候概率或官方季节预测。")
     # 多轮上下文：识别"追问"并继承上一话题/时效
     prev = ""
     if history:
@@ -274,6 +296,8 @@ def answer(question, context=None, history=None):
         intent, conf = strong, max(conf, 0.9)
     elif conf < 0.8 and kw:
         intent, conf = kw, max(conf, 0.8)
+    if not strong and not kw and conf < 0.45:
+        return _reply("我不太确定你的问题。可以这样问：今天有风险吗 / 要不要防冻 / 先采哪块地 / 保险多少钱 / 今年什么时候开采。")
     sl = _slots(qt, data)
     try:
         from . import nlg

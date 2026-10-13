@@ -143,6 +143,30 @@ CHAT_SYSTEM = (
 )
 
 
+def rephrase_keep_numbers(question, base_text):
+    """仅润色文字，禁止改动任何数值/日期/结论；校验失败即回退原文。返回 {source, text}。"""
+    import re as _re
+    nums = _re.findall(r"\d+(?:\.\d+)?", base_text)
+    if requests and os.environ.get("DEEPSEEK_API_KEY"):
+        sys_p = ("你只做文字润色。规则：不得新增、修改或删除任何数字与日期；不得改变结论与建议动作；"
+                 "只把句子改得更口语、通顺；输出不超过原文长度的1.2倍；直接输出润色后的整段文字。")
+        try:
+            r = requests.post(API_URL, timeout=60,
+                              headers={"Authorization": "Bearer " + os.environ["DEEPSEEK_API_KEY"],
+                                       "Content-Type": "application/json"},
+                              json={"model": MODEL,
+                                    "messages": [{"role": "system", "content": sys_p},
+                                                 {"role": "user", "content": "原文：" + base_text}],
+                                    "temperature": 0.2, "max_tokens": 300})
+            r.raise_for_status()
+            out = r.json()["choices"][0]["message"]["content"].strip()
+            if out and all(n in out for n in nums) and len(out) <= len(base_text) * 1.6:
+                return {"source": "deepseek-rephrase", "text": out}
+        except Exception as e:  # noqa: BLE001
+            print("  [rephrase] 调用失败，回退规则:", e)
+    return {"source": "rule_fallback", "text": base_text}
+
+
 def chat(question, context):
     """对话式问答。返回 {source, text}。context 为已整理的实时数据摘要(dict)。"""
     if requests and os.environ.get("DEEPSEEK_API_KEY"):
