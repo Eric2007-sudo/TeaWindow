@@ -60,6 +60,7 @@ def main():
 
     tr = load(os.path.join(a.data, "intents_train.jsonl"))
     ev = load(os.path.join(a.data, "intents_eval.jsonl"))
+    ch = load(os.path.join(a.data, "intents_challenge.jsonl"))
     unl = load(os.path.join(a.data, "pseudo_clean.jsonl"))
     tr_texts = [r["text"] for r in tr]
     tr_y = torch.tensor([cidx[r["intent"]] for r in tr])
@@ -76,10 +77,19 @@ def main():
     print("teacher train-fit acc=%.4f  teacher eval acc=%.4f" % (t_acc, float((np.array([classes[i] for i in eval_t.argmax(-1).numpy()]) == ev_y).mean())), flush=True)
 
     student = AutoModelForSequenceClassification.from_pretrained(a.student, num_labels=len(classes)).to(dev)
-    opt = torch.optim.AdamW(student.parameters(), lr=a.lr)
-    ce = torch.nn.CrossEntropyLoss()
+    opt = torch.optim.AdamW(student.parameters(), lr=a.lr, weight_decay=0.01)
+    ce = torch.nn.CrossEntropyLoss(label_smoothing=0.05)
     n = len(tr_texts); idx = np.arange(n)
 
+    def student_acc(rows):
+        student.eval(); preds = []
+        with torch.no_grad():
+            for e in encode_batch(tok, [r["text"] for r in rows], dev):
+                preds += list(student(**e).logits.argmax(-1).cpu().numpy())
+        student.train()
+        return float((np.array([classes[i] for i in preds]) == np.array([r["intent"] for r in rows])).mean())
+
+    best_acc = -1.0; best_state = None; best_ep = 0; bad = 0
     student.train()
     for ep in range(a.epochs):
         np.random.shuffle(idx)
@@ -107,21 +117,32 @@ def main():
                 logits = student(**e).logits
                 loss = F.kl_div(F.log_softmax(logits / a.T, dim=-1), F.softmax(tl / a.T, dim=-1), reduction="batchmean") * (a.T ** 2)
                 opt.zero_grad(); loss.backward(); opt.step(); tot += float(loss); nb += 1
-        print(f"epoch {ep+1}/{a.epochs} loss {tot/max(1,nb):.4f}", flush=True)
+        ev_acc = student_acc(ev)
+        ch_acc_ep = student_acc(ch) if ch else float("nan")
+        print(f"epoch {ep+1}/{a.epochs} loss {tot/max(1,nb):.4f} eval_acc {ev_acc:.4f} challenge_acc {ch_acc_ep:.4f}", flush=True)
+        if ev_acc > best_acc + 1e-6:
+            best_acc, best_ep, bad = ev_acc, ep + 1, 0
+            import copy as _copy
+            best_state = _copy.deepcopy(student.state_dict())
+        else:
+            bad += 1
+            if bad >= 3:
+                print(f"early stop at epoch {ep+1} (best {best_ep} eval {best_acc:.4f})", flush=True)
+                break
+    if best_state is not None:
+        student.load_state_dict(best_state)
 
-    # 评测学生
+    # 评测学生（eval + 挑战集）
+    acc = student_acc(ev)
+    ch_acc = student_acc(ch) if ch else float("nan")
     student.eval()
-    preds = []
-    with torch.no_grad():
-        for e in encode_batch(tok, ev_texts, dev):
-            preds += list(student(**e).logits.argmax(-1).cpu().numpy())
-    acc = float((np.array([classes[i] for i in preds]) == ev_y).mean())
-    print(f"STUDENT_EVAL_ACC={acc:.4f}", flush=True)
+    print(f"STUDENT_EVAL_ACC={acc:.4f} STUDENT_CHALLENGE_ACC={ch_acc:.4f} (best_epoch={best_ep})", flush=True)
 
     os.makedirs(a.out, exist_ok=True)
     student.save_pretrained(a.out); tok.save_pretrained(a.out)
-    json.dump({"classes": classes, "eval_acc": acc, "student": a.student, "teacher": a.teacher,
-               "n_labeled": len(tr_texts), "n_unlabeled": len(unl_texts), "n_eval": len(ev), "T": a.T, "alpha": a.alpha},
+    json.dump({"classes": classes, "eval_acc": acc, "challenge_acc": ch_acc, "student": a.student, "teacher": a.teacher,
+               "n_labeled": len(tr_texts), "n_unlabeled": len(unl_texts), "n_eval": len(ev), "n_challenge": len(ch),
+               "T": a.T, "alpha": a.alpha},
               open(os.path.join(a.out, "labels.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
     # 导出 int8 ONNX

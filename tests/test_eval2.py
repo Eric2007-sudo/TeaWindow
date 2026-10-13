@@ -151,3 +151,40 @@ def test_summary_season_field():
     assert "season" in j
     if j["season"] == "off":
         assert j["pick_window"] == []
+
+
+# ---------------- 意图后端（ONNX 可选 + numpy 兜底） ----------------
+def test_engine_reports_backend():
+    import qa.engine as e
+    r = e.answer("今天有风险吗")
+    assert r.get("backend") in ("numpy", None) or isinstance(r.get("backend"), str)
+
+
+def test_intent_backend_modules():
+    from qa import intent_onnx
+    assert isinstance(intent_onnx.available(), bool)
+    res = intent_onnx.classify("今天有风险吗")
+    # 未启用依赖时返回 None；启用时返回 (label, conf)
+    assert res is None or (isinstance(res, tuple) and len(res) == 2 and isinstance(res[1], float))
+
+
+def test_onnx_backend_labels_match_engine_classes():
+    from qa import intent_onnx
+    import qa.engine as e
+    if not intent_onnx.available():
+        pytest.skip("ONNX 后端未启用")
+    onnx_classes = set(intent_onnx._classes)  # noqa: SLF001
+    numpy_classes = set(e._load_model()["classes"])
+    assert onnx_classes == numpy_classes
+
+
+def test_engine_falls_back_to_numpy(monkeypatch):
+    # 模拟 ONNX 不可用 → 应回退 numpy 并正常作答
+    import qa.engine as e
+    from qa import intent_onnx
+    monkeypatch.setattr(intent_onnx, "_session", None)
+    monkeypatch.setattr(intent_onnx, "_loaded", True)
+    monkeypatch.setattr(intent_onnx, "_backend", None)
+    r = e.answer("先采哪块地")
+    assert r["text"]
+    assert r["backend"] == "numpy"

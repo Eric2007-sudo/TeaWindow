@@ -95,3 +95,37 @@ BERT 在**同一份 74 条分层评测**上比轻量模型高 **16.2 个百分�
 - 日志：`report/gpu_train_intent2.txt`、`report/gpu_export_intent_onnx.txt`、`report/gpu_distill_tiny.txt`、`report/gpu_train_embedder2.txt`、
   `report/gpu_intent_onnx_labels.json`、`report/gpu_intent_tiny_labels.json`。
 - 本报告数字均由上述脚本在 GPU 1 上实测得到；GPU 已于训练后释放。
+
+## 8. 第四轮（扩语料 + 更强基座 + 蒸馏上线）
+> 目标：按"适当增大训练/测试集、防过拟合"的要求再训一轮，并把最优学生模型接入生产。
+
+### 8.1 语料再扩（分层 + 独立挑战集）
+| 项 | 第三轮 | 第四轮 |
+|---|---|---|
+| 训练样本 | 1561 | **2051** |
+| 评测样本 | 74 | **125**（每类 ≥5，分层） |
+| 挑战集（手写、不参与训练） | — | **45** |
+
+### 8.2 教师：`hfl/chinese-roberta-wwm-ext`（早停）
+| 指标 | 值 |
+|---|---|
+| 评测准确率 | **93.6%** |
+| 挑战集准确率 | **88.9%** |
+| 最佳 epoch | 2（patience=3 早停，防过拟合） |
+
+### 8.3 学生蒸馏对比
+| 学生 | 评测 | 挑战集 | 体积(int8) | 结论 |
+|---|---|---|---|---|
+| `ckiplab/bert-tiny-chinese` | 84.0% | 68.9% | 11 MB | 容量不足，泛化差 |
+| **`hfl/rbt3`** | **92.8%** | **91.1%** | **36 MB** | **接近教师、泛化更好 → 采用** |
+| numpy 生产模型 | 76.8% | 82.2% | <2 MB | 兜底 |
+
+- `hfl/rbt3` int8 ONNX（onnxruntime 实测）：**评测 91.2%**，36 MB；早停于 epoch 1，几乎无过拟合。
+- 关键：**换更强教师 + 更大且分层的语料**后，学生不再是瓶颈（tiny→rbt3 提升 8.8pt）。
+
+### 8.4 上线（生产可选后端）
+- 新增 `src/qa/intent_onnx.py`：**优先调用 ONNX（rbt3-int8）**，依赖缺失或失败**自动回退 numpy**（`TW_INTENT_ONNX=0` 可禁用）。
+- 模型入仓：`models/qa_intent_onnx/{model.int8.onnx(36MB), tokenizer.json, labels.json, vocab.txt}`；
+  `requirements.txt` 增 `onnxruntime`、`tokenizers`。
+- `/api/ask` 响应新增 `backend` 字段（`onnx-rbt3-int8` 或 `numpy`）。
+- 校验：`tests/test_eval2.py` 覆盖后端可用性、类别一致与**回退路径**。

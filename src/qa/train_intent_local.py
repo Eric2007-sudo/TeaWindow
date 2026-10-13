@@ -101,14 +101,19 @@ def main():
     def predict(X):
         return (X @ W.T + b).argmax(1)
     acc = float((predict(Xev) == yev).mean())
+    ch = load(os.path.join(QA, "intents_challenge.jsonl"))
+    ch_acc = float("nan")
+    if ch:
+        ch_acc = float((predict(vectorize([r["text"] for r in ch], vocab)) ==
+                        np.array([cidx[r["intent"]] for r in ch])).mean())
     # 混淆矩阵
     K = len(classes)
     cm = np.zeros((K, K), dtype=int)
     for t, p in zip(yev, predict(Xev)):
         cm[t, p] += 1
     md = ["# 自研问答意图分类器（本机 numpy）\n",
-          f"- 类别 {len(classes)}；训练 {len(tr)}，评测 {len(ev)}；字符 1-2gram 特征 {Xtr.shape[1]} 维。",
-          f"- **评测准确率 = {acc*100:.1f}%**\n",
+          f"- 类别 {len(classes)}；训练 {len(tr)}，评测 {len(ev)}，挑战集 {len(ch)}；字符 1-2gram 特征 {Xtr.shape[1]} 维。",
+          f"- **评测准确率 = {acc*100:.1f}%**；挑战集准确率 = {ch_acc*100:.1f}%\n",
           "## 各类分布（评测集）"]
     for c in classes:
         i = cidx[c]; total = int(cm[i].sum())
@@ -120,9 +125,9 @@ def main():
     open(os.path.join(REPORT, "qa_model.md"), "w", encoding="utf-8").write("\n".join(md))
 
     json.dump({"classes": classes, "vocab": vocab, "W": W.tolist(), "b": b.tolist(),
-               "acc": acc, "n_train": len(tr), "n_eval": len(ev)},
+               "acc": acc, "challenge_acc": ch_acc, "n_train": len(tr), "n_eval": len(ev)},
               open(os.path.join(MODELS, "qa_intent.json"), "w", encoding="utf-8"), ensure_ascii=False)
-    print(f"准确率={acc*100:.1f}% -> models/qa_intent.json, report/qa_model.md")
+    print(f"准确率={acc*100:.1f}% 挑战集={ch_acc*100:.1f}% -> models/qa_intent.json, report/qa_model.md")
 
 
 if __name__ == "__main__":

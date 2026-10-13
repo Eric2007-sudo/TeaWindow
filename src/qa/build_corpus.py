@@ -1,8 +1,11 @@
 """
 A-1 语料构建：合成"茶农口吻"问答意图标注集（用于训练我们自己的意图分类器）。
-- 结合本项目场景与公开报道/访谈的常见问法，合理外延。
-- 评测集采用**按类分层抽样**（每类 ≥3 条），避免旧版"某类 0 条评测"的偏差。
-输出 data/qa/intents_train.jsonl、data/qa/intents_eval.jsonl、data/qa/knowledge.json
+
+设计（第三轮扩展，防过拟合）：
+- 每类种子问句扩至 ~30+ 条；评测集**按类分层**取 ~30%（每类 ≥5 条），训练集 ~70% 再增广。
+- 增广（前缀/后缀/同义/轻度字符噪声）**只作用于训练集**，评测集保持干净、无泄漏。
+- 另设**独立"挑战集"**（`intents_challenge.jsonl`）：手工新写、不出现在种子中，用于检测泛化/过拟合。
+输出 data/qa/{intents_train,intents_eval,intents_challenge}.jsonl、knowledge.json、pseudo_{input,clean}.jsonl
 """
 import json
 import os
@@ -11,7 +14,7 @@ import random
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 QA = os.path.join(ROOT, "data", "qa")
 
-# 意图 -> 茶农口吻样例（每类 ≥ 20 条，覆盖不同表述，减少同义反复）
+# 意图 -> 茶农口吻样例（每类 ≥ 30 条）
 INTENTS = {
     "risk_today": [
         "今天茶园有风险吗", "现在有没有什么风险", "今天整体天气对茶树有影响不",
@@ -22,6 +25,9 @@ INTENTS = {
         "最近要不要留意天气", "今天整体风险如何", "有没有需要提前防范的",
         "现在有没有灾害风险", "这几天有什么天气隐患", "今天风险等级多少",
         "今天需要注意什么风险", "今天天气对采茶有影响吗",
+        "今天茶园情况如何", "最近有没有要注意的天气", "当前风险算高吗",
+        "今天适不适合农事", "这几天天气对茶树友好吗", "现在风险等级是多少",
+        "今天有没有气象灾害", "当前茶园有没有要防的",
     ],
     "frost": [
         "最近会倒春寒吗", "会不会下霜冻到茶芽", "明天早上有霜冻吗", "这几天会不会打霜",
@@ -31,6 +37,9 @@ INTENTS = {
         "会不会有晚霜", "明早会不会结霜", "嫩芽会不会被冻", "倒春寒要不要提前防",
         "茶叶会不会遭冻害", "这几天夜间温度够不够低", "要不要防晚霜",
         "霜冻预警有没有", "春霜风险大吗", "冻害要不要防范", "低温冻害严不严重",
+        "未来几天会不会下霜", "夜里会不会有霜", "嫩芽冻伤风险高吗",
+        "要不要提前防倒春寒", "晚霜会不会来", "低温会不会伤到茶芽",
+        "茶芽能不能扛过低温", "这几天会不会有霜冻",
     ],
     "heat": [
         "高温会不会晒伤茶树", "这几天会不会太热", "夏天茶树怎么防高温", "会不会有热害",
@@ -39,6 +48,9 @@ INTENTS = {
         "热害风险高不高", "会不会持续高温", "茶树会不会被晒坏", "要不要防热害",
         "未来会不会很热", "高温预警有没有", "正午要不要遮阴", "茶叶顶会不会晒焦",
         "伏天热害风险如何", "要不要给茶树降温", "连续高温要不要遮阳",
+        "这几天温度会不会太高", "茶树受不受得了高温", "要不要给茶园降温",
+        "热害会不会来", "未来一周会不会很热", "中午太阳会不会晒伤",
+        "持续高温影响大吗", "高温会不会影响产量",
     ],
     "drought": [
         "多久没下雨了要不要浇水", "土壤干不干要不要灌溉", "干旱风险大不大",
@@ -47,6 +59,8 @@ INTENTS = {
         "连续晴热要不要灌水", "干旱会不会影响发芽", "要不要抗旱", "茶园是不是旱了",
         "要不要抽水浇园", "墒情怎么样", "要不要保墒", "旱情预警有没有",
         "茶树缺水了吗", "要不要给茶园补水", "土壤是不是太干了",
+        "茶园土壤缺不缺水", "要不要开始灌溉", "旱情严不严重", "多久没有效降雨了",
+        "要不要给茶树补水", "墒情够不够", "干旱要不要防", "缺水会影响产量吗",
     ],
     "rain": [
         "下雨要不要采茶", "连阴雨对采摘有影响吗", "雨水多了怎么办", "要不要清沟排水",
@@ -54,7 +68,9 @@ INTENTS = {
         "降水多品质会不会变差", "要不要防涝", "这几天雨大不大", "湿害风险大吗",
         "下雨天能不能采", "会不会连阴雨", "雨水太多要不要排水", "连日阴雨怎么办",
         "要不要开沟排水", "湿害预警有没有", "土壤积水怎么办", "连日下雨要不要防涝",
-        "雨水多茶树会不会烂根",
+        "雨水多茶树会不会烂根", "未来会不会下雨", "雨太多了要不要排",
+        "连阴雨要不要防", "茶园会不会积水", "雨水多要不要开沟", "湿害严不严重",
+        "下雨对采摘有影响吗", "要不要清沟防涝",
     ],
     "pick_window": [
         "什么时候采明前茶最好", "明天适合采茶吗", "这几天采摘窗口怎么样",
@@ -63,7 +79,9 @@ INTENTS = {
         "采摘的最佳日子是哪天", "春茶什么时候采品质最好",
         "什么时候采摘最合适", "这几天能不能采摘", "采摘窗口在哪几天",
         "现在适合采茶吗", "明天适不适合采摘", "明前采摘窗口", "什么时候采最好",
-        "这几天采摘合适吗", "采摘适宜期是什么时候",
+        "这几天采摘合适吗", "采摘适宜期是什么时候", "这两天适不适合采摘",
+        "采摘窗口什么时候到", "现在能不能采茶", "哪天采茶最好", "采摘期到了吗",
+        "什么时候是采摘好时机", "这几天采茶合适吗",
     ],
     "schedule": [
         "先采哪块地", "明天安排采哪片茶园", "帮我排一下采摘计划", "哪块地该先抢采",
@@ -71,6 +89,8 @@ INTENTS = {
         "哪块地风险高要先采", "帮我排个采茶排班", "明天上山采哪块", "按什么顺序采摘",
         "先采哪片", "排一下采摘顺序", "明天先安排哪块", "哪块地优先采",
         "帮我排采茶队", "采茶顺序怎么定", "哪片先采", "先采哪个地块",
+        "采茶怎么排", "先安排哪片茶园", "哪块地先动手", "采摘顺序怎么安排",
+        "帮我安排采摘", "明天采哪块地", "哪片茶园先采", "排一下采茶计划",
     ],
     "decision": [
         "该抢采还是再等等", "要不要现在抢采", "今天采还是等两天", "要不要提前采掉",
@@ -78,6 +98,8 @@ INTENTS = {
         "该不该冒险采", "现在动手还是观察", "建议抢采吗", "要不要提前采摘规避风险",
         "现在采还是等", "要不要抢采", "该不该采", "要不要等两天再采",
         "抢采还是防护", "现在动手合适吗", "今天动手采还是再等等",
+        "现在要不要采", "是采还是等", "今天该不该采", "要不要再等两天",
+        "现在下手采还是等", "要不要抢时间采", "该采还是防护", "现在采划算吗",
     ],
     "insurance": [
         "茶叶保险怎么买", "保费多少钱一亩", "受灾能赔多少", "有没有天气指数保险",
@@ -85,6 +107,8 @@ INTENTS = {
         "霜冻能赔钱吗", "保险赔付怎么算", "要不要买茶叶保险",
         "天气指数保险怎么赔", "受灾怎么赔", "买茶叶保险划算吗", "赔付标准是什么",
         "保险怎么申请赔付", "指数保险触发条件是什么",
+        "茶叶保险贵不贵", "霜冻保险怎么买", "受灾有没有赔偿", "保费大概多少",
+        "指数保险赔多少", "保险怎么买", "理赔标准是什么", "要不要投保",
     ],
     "value": [
         "这风险值多少钱", "预计会损失多少", "一年损失大概多少", "防灾能省多少钱",
@@ -92,6 +116,8 @@ INTENTS = {
         "防护能挽回多少损失", "风险的经济影响大不大", "值不值得用这个系统",
         "一年能减少多少损失", "这套系统能省多少", "损失多少", "一年亏多少",
         "防灾值不值", "每亩损失多少", "投入产出如何", "用了能挽回多少",
+        "系统值多少钱", "能省多少成本", "一年损失有多大", "防灾划算吗",
+        "每亩能省多少", "投入划算吗", "损失严不严重", "用这个能减多少损",
     ],
     "harvest_date": [
         "今年西湖龙井什么时候开采", "开采期大概几号", "今年茶什么时候能采",
@@ -100,6 +126,8 @@ INTENTS = {
         "今年头采是哪天", "开采时间比去年早还是晚",
         "今年几号开采", "开采期定了吗", "什么时候能采头茶", "开采时间预测",
         "今年开采早还是晚", "明前茶什么时候开采", "开采日期预计几号",
+        "今年什么时候可以采", "开采日子定了吗", "头采几号", "开采大概什么时候",
+        "今年开采日期", "什么时候开采头茶", "开采期在几月", "今年采摘从哪天开始",
     ],
     "data_source": [
         "你们的数据从哪来的", "用的什么数据", "数据可靠吗", "气象数据哪里来的",
@@ -107,6 +135,8 @@ INTENTS = {
         "这些指标怎么算出来的", "数据多久更新一次", "数据是公开的吗",
         "数据是哪里来的", "气象数据可靠吗", "有没有卫星数据", "数据更新频率",
         "数据公开吗", "用了哪些数据源", "数据从哪里获取的",
+        "你们的数据是哪来的", "数据靠不靠谱", "有没有用气象站数据", "数据是怎么来的",
+        "用了哪些资料", "数据质量如何", "数据从哪里来", "数据源有哪些",
     ],
     "model": [
         "你们用什么模型", "AI是怎么预测的", "模型准不准", "准确率多少",
@@ -114,6 +144,8 @@ INTENTS = {
         "模型的依据是什么", "怎么保证不误报", "模型会不会出错", "有没有独立验证",
         "这个AI是你们自己做的吗", "预测准不准", "模型怎么做的", "准确率多高",
         "会不会误报", "模型怎么验证", "这个AI谁做的", "模型可不可靠",
+        "这个模型靠谱吗", "预测准吗", "模型效果怎么样", "有没有验证过",
+        "模型是怎么做出来的", "识别准不准", "AI怎么工作的", "模型可信吗",
     ],
     "plot": [
         "哪块地风险最高", "不同地块有啥区别", "我的地块和别人的一样吗",
@@ -121,12 +153,66 @@ INTENTS = {
         "地块之间差别大吗", "北坡的茶园要注意啥", "地形对风险有影响吗",
         "哪块地更怕霜冻", "不同海拔有区别吗", "哪块地最危险", "地块差别大吗",
         "低洼地风险高吗", "北坡要注意什么", "哪片最怕冻", "不同坡向有什么区别",
+        "哪块地最容易受灾", "地块风险有差别吗", "阴坡茶园要注意什么",
+        "哪片茶园最危险", "地块怎么区分风险", "不同地形风险一样吗",
+        "哪块地要重点看", "坡向影响风险吗",
     ],
     "greet": [
         "你好", "在吗", "谢谢", "你好呀", "帮我看看", "你好，问个问题", "谢谢啦",
         "辛苦了", "早上好", "有人吗", "在么", "麻烦你了", "问个问题", "你好在吗",
+        "在不在", "多谢", "麻烦你了，问一下", "谢谢帮忙", "在的话回一下", "感谢",
+        "哈喽", "你好啊", "谢谢你了", "在吗在吗",
     ],
 }
+
+# 独立挑战集：手工新写、不出现在种子中（用于测泛化/过拟合；不参与训练）
+CHALLENGE = [
+    ("周末要不要提前把嫩芽采了", "decision"),
+    ("这几天的低温会不会把芽尖打坏", "frost"),
+    ("午后太阳太毒要不要拉网", "heat"),
+    ("地皮看着发白发干要不要供水", "drought"),
+    ("水汽太重叶子上会不会闷出问题", "rain"),
+    ("按现在的天时哪天动剪子下园最合适", "pick_window"),
+    ("先照顾哪一片坡面", "schedule"),
+    ("眼下到底是抢摘还是先护着", "decision"),
+    ("出了灾情找谁报账", "insurance"),
+    ("这套东西一年下来能帮我挡掉多少亏空", "value"),
+    ("头茬大概什么时候能上锅", "harvest_date"),
+    ("你们背后用的是哪家的资料", "data_source"),
+    ("背后的算法是怎么跑出来的", "model"),
+    ("哪一面山坡最怕冻", "plot"),
+    ("在的麻烦回个话", "greet"),
+    ("现在山场有没有需要注意的地方", "risk_today"),
+    ("霜一下来是不是就把芽打黑了", "frost"),
+    ("树冠顶会不会被烈日烫伤", "heat"),
+    ("地下干的厉害是不是得补水了", "drought"),
+    ("雨下不停要不要把沟挖开", "rain"),
+    ("这几天摘得动吗", "pick_window"),
+    ("先忙哪边茶山", "schedule"),
+    ("今天该动手还是再观望", "decision"),
+    ("万一绝收有没有兜底", "insurance"),
+    ("用它能少亏多少钱", "value"),
+    ("什么时候开始头采", "harvest_date"),
+    ("这些数据你们打哪弄的", "data_source"),
+    ("识别到底靠不靠谱", "model"),
+    ("哪块山场最容易挨冻", "plot"),
+    ("麻烦看一下", "greet"),
+    ("这两天山上稳不稳", "risk_today"),
+    ("晚上会不会上冻", "frost"),
+    ("大太阳会不会把叶子烤坏", "heat"),
+    ("要不要开泵浇地", "drought"),
+    ("积水排不排得掉", "rain"),
+    ("哪天摘最划算", "pick_window"),
+    ("明天工队往哪片走", "schedule"),
+    ("要不要现在下手摘", "decision"),
+    ("赔款怎么算", "insurance"),
+    ("投入产出划不划算", "value"),
+    ("开采的日子定下来没", "harvest_date"),
+    ("资料从哪儿来", "data_source"),
+    ("这个系统是怎么弄出来的", "model"),
+    ("哪片坡最容易冻伤", "plot"),
+    ("在吗，问点事", "greet"),
+]
 
 # 知识/事实（供检索与接地回答；均来自本项目产出）
 KNOWLEDGE = {
@@ -151,69 +237,65 @@ KNOWLEDGE = {
     ],
 }
 
+PREFIXES = ["", "师傅，", "请问", "想问问，", "帮我看下，", "麻烦问下，", "请教下，", "老板，"]
+SUFFIXES = ["", "呢", "吗", "啊", "？", "呀", "，谢谢"]
+SYN = {"霜冻": ["下霜", "打霜", "冻害"], "高温": ["大热天", "酷热", "热害"], "采摘": ["采茶", "开采", "摘茶"],
+       "地块": ["茶园", "地", "山场"], "灌溉": ["浇水", "灌水"], "保险": ["保费", "投保"],
+       "损失": ["亏", "赔", "亏本"], "寒潮": ["冷空气", "倒春寒"]}
+
+
+def _augment(text, rng, noisy=True):
+    t = text
+    for k, vs in SYN.items():
+        if k in t and rng.random() < 0.5:
+            t = t.replace(k, rng.choice(vs))
+    t = rng.choice(PREFIXES) + t + rng.choice(SUFFIXES)
+    if noisy and rng.random() < 0.25 and len(t) > 4:
+        i = rng.randrange(len(t)); t = t[:i] + t[i + 1:]
+    return t
+
 
 def main():
     os.makedirs(QA, exist_ok=True)
     rng = random.Random(42)
     train, ev = [], []
     for intent, qs in INTENTS.items():
-        items = list(qs)
+        items = list(dict.fromkeys(qs))          # 去重
         rng.shuffle(items)
-        n_ev = max(3, int(round(len(items) * 0.25)))   # 分层：每类至少 3 条评测
+        n_ev = max(5, int(round(len(items) * 0.30)))   # 分层：每类 ≥5 条评测
         ev += [{"text": q, "intent": intent} for q in items[:n_ev]]
         train += [{"text": q, "intent": intent} for q in items[n_ev:]]
-    # 增广：同义替换 + 称呼/语气前后缀 + 轻度字符噪声（仅训练集，评测集保持干净）
-    prefixes = ["", "师傅，", "请问", "想问问，", "帮我看下，", "麻烦问下，", "请教下，", "老板，"]
-    suffixes = ["", "呢", "吗", "啊", "？", "呀", "，谢谢"]
-    syn = {"霜冻": ["下霜", "打霜", "冻害"], "高温": ["大热天", "酷热", "热害"], "采摘": ["采茶", "开采", "摘茶"],
-           "地块": ["茶园", "地", "山场"], "灌溉": ["浇水", "灌水"], "保险": ["保费", "投保"],
-           "损失": ["亏", "赔", "亏本"], "寒潮": ["冷空气", "倒春寒"]}
 
-    def augment(text):
-        t = text
-        for k, vs in syn.items():
-            if k in t and rng.random() < 0.5:
-                t = t.replace(k, rng.choice(vs))
-        t = rng.choice(prefixes) + t + rng.choice(suffixes)
-        if rng.random() < 0.35 and len(t) > 4:
-            i = rng.randrange(len(t)); t = t[:i] + t[i + 1:]
-        return t
-
+    # 增广（仅训练集）
     aug = []
     for rec in list(train):
         for _ in range(6):
-            aug.append({"text": augment(rec["text"]), "intent": rec["intent"]})
-    train += aug
+            aug.append({"text": _augment(rec["text"], rng, noisy=True), "intent": rec["intent"]})
+    train = train + aug
     rng.shuffle(train); rng.shuffle(ev)
-    with open(os.path.join(QA, "intents_train.jsonl"), "w", encoding="utf-8") as f:
-        for r in train:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    with open(os.path.join(QA, "intents_eval.jsonl"), "w", encoding="utf-8") as f:
-        for r in ev:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    def dump(name, rows):
+        with open(os.path.join(QA, name), "w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    dump("intents_train.jsonl", train)
+    dump("intents_eval.jsonl", ev)
+    dump("intents_challenge.jsonl", [{"text": t, "intent": i} for t, i in CHALLENGE])
     with open(os.path.join(QA, "knowledge.json"), "w", encoding="utf-8") as f:
         json.dump(KNOWLEDGE, f, ensure_ascii=False, indent=2)
 
-    # 蒸馏用：生成大量合成问句（无标签），供 GPU-BERT 打伪标签
-    allqs = [q for qs in INTENTS.values() for q in qs]
-
-    def augment_clean(text):
-        t = text
-        for k, vs in syn.items():
-            if k in t and rng.random() < 0.5:
-                t = t.replace(k, rng.choice(vs))
-        return rng.choice(prefixes) + t + rng.choice(suffixes)
-
+    # 蒸馏用无标注问句：只用训练集种子生成（避免评测/挑战集表面泄漏）
+    train_seed = [r["text"] for r in train if r["text"] in {q for qs in INTENTS.values() for q in qs}]
     with open(os.path.join(QA, "pseudo_input.jsonl"), "w", encoding="utf-8") as f:
         for _ in range(4000):
-            f.write(json.dumps({"text": augment(rng.choice(allqs))}, ensure_ascii=False) + "\n")
-    # 干净版（无字符噪声，语义清晰）——蒸馏更稳
+            f.write(json.dumps({"text": _augment(rng.choice(train_seed), rng, noisy=True)}, ensure_ascii=False) + "\n")
     with open(os.path.join(QA, "pseudo_clean.jsonl"), "w", encoding="utf-8") as f:
-        for _ in range(4000):
-            f.write(json.dumps({"text": augment_clean(rng.choice(allqs))}, ensure_ascii=False) + "\n")
+        for _ in range(6000):
+            f.write(json.dumps({"text": _augment(rng.choice(train_seed), rng, noisy=False)}, ensure_ascii=False) + "\n")
 
-    print(f"意图数={len(INTENTS)} 训练={len(train)} 评测={len(ev)}")
-    print("-> data/qa/intents_train.jsonl, intents_eval.jsonl, knowledge.json, pseudo_input.jsonl")
+    print(f"意图数={len(INTENTS)} 训练={len(train)} 评测={len(ev)} 挑战={len(CHALLENGE)} 蒸馏无标注=6000")
+    print("-> data/qa/{intents_train,intents_eval,intents_challenge}.jsonl, knowledge.json, pseudo_{input,clean}.jsonl")
 
 
 if __name__ == "__main__":

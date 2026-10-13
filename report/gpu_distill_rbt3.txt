@@ -1,0 +1,22 @@
+classes=15 labeled=2051 unlabeled=6000 eval=125
+teacher train-fit acc=0.9995  teacher eval acc=0.9360
+Error while downloading from https://cas-bridge.xethub.hf.co/xet-bridge-us/621ffdc136468d709f17bac1/adb5401aaad4d42e1ec1ad4a543cdf7c80e6dc86af9588a1bafb4532bfa113a5?Expires=1791912430&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9jYXMtYnJpZGdlLnhldGh1Yi5oZi5jby94ZXQtYnJpZGdlLXVzLzYyMWZmZGMxMzY0NjhkNzA5ZjE3YmFjMS9hZGI1NDAxYWFhZDRkNDJlMWVjMWFkNGE1NDNjZGY3YzgwZTZkYzg2YWY5NTg4YTFiYWZiNDUzMmJmYTExM2E1KiIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc5MTkxMjQzMH19fV19&Signature=MEQCIF5w9b%7E0TXutIBBCnXFlRezaccdbv0bIGBlwXDQdKD6MAiAVpueqBvyRFRVjyX9h8MBKkvjRH5r2uqwVL6XjJ15lIA__&Key-Pair-Id=K3EPXBYC3CKDRZ&xip=_4MbHnvJL8Q&response-content-type=application%2Foctet-stream&X-Xet-Cas-Uid=62171e3b6a99db28e0b3159d&response-content-disposition=inline%3B+filename*%3DUTF-8%27%27pytorch_model.bin%3B+filename%3D%22pytorch_model.bin%22%3B&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=cas%2F20261013%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261013T162710Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=b67949b2bdb43e79064b931f458a1909ef3ed0e0922362be9aa88df5982feed7: HTTPSConnectionPool(host='cas-bridge.xethub.hf.co', port=443): Read timed out.
+Trying to resume download...
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at hfl/rbt3 and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+/home/eric/teacloud/distill_intent_tiny.py:108: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  opt.zero_grad(); loss.backward(); opt.step(); tot += float(loss); nb += 1
+epoch 1/16 loss 0.8390 eval_acc 0.9280 challenge_acc 0.9111
+epoch 2/16 loss 0.0761 eval_acc 0.9120 challenge_acc 0.9111
+epoch 3/16 loss 0.0635 eval_acc 0.9200 challenge_acc 0.8889
+epoch 4/16 loss 0.0604 eval_acc 0.9120 challenge_acc 0.8889
+early stop at epoch 4 (best 1 eval 0.9280)
+STUDENT_EVAL_ACC=0.9280 STUDENT_CHALLENGE_ACC=0.9111 (best_epoch=1)
+/home/eric/teacloud/distill_intent_tiny.py:159: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+  torch.onnx.export(student, args, onnx_path, dynamo=False, **kw)
+/home/eric/teacloud/envs/qa/lib/python3.10/site-packages/transformers/modeling_attn_mask_utils.py:196: TracerWarning: torch.tensor results are registered as constants in the trace. You can safely ignore this warning if you use this function to create tensors out of constant variables that would be the same every time you call this function. In any other case, this might cause the trace to be incorrect.
+  inverted_mask = torch.tensor(1.0, dtype=dtype) - expanded_mask
+WARNING:root:Please consider to run pre-processing before quantization. Refer to example: https://github.com/microsoft/onnxruntime-inference-examples/blob/main/quantization/image_classification/cpu/ReadMe.md 
+onnx fp32 146MB int8 36MB
+saved -> /home/eric/teacloud/models/qa_intent_rbt3

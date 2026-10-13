@@ -1,0 +1,11 @@
+classes=15 train=2051 eval=125 challenge=45 base=hfl/chinese-roberta-wwm-ext
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at hfl/chinese-roberta-wwm-ext and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+epoch 1/10 loss 1.4776 eval_acc 0.9280 challenge_acc 0.9778
+epoch 2/10 loss 0.3964 eval_acc 0.9360 challenge_acc 0.8889
+epoch 3/10 loss 0.3277 eval_acc 0.9280 challenge_acc 0.9556
+epoch 4/10 loss 0.3177 eval_acc 0.9280 challenge_acc 0.9556
+epoch 5/10 loss 0.3158 eval_acc 0.9280 challenge_acc 0.9556
+early stop at epoch 5 (best epoch 2 eval_acc 0.9360)
+BEST eval_acc=0.9360 challenge_acc=0.8889 (best_epoch=2)
+saved -> /home/eric/teacloud/models/qa_intent_roberta

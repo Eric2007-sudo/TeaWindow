@@ -136,12 +136,29 @@ def _horizon(q):
 
 
 def classify(q):
+    # 优先使用 GPU 蒸馏的 ONNX 意图模型（可用时），否则回退本地 numpy 模型
+    try:
+        from . import intent_onnx
+    except Exception:  # noqa: BLE001
+        intent_onnx = None
+    if intent_onnx is not None:
+        r = intent_onnx.classify(q)
+        if r is not None:
+            return r
     m = _load_model()
     x = _vec(q, m["vocab"])
     z = m["W"] @ x + m["b"]
     p = np.exp(z - z.max()); p /= p.sum()
     i = int(p.argmax())
     return m["classes"][i], float(p[i])
+
+
+def intent_backend():
+    try:
+        from . import intent_onnx
+        return intent_onnx.backend() or "numpy"
+    except Exception:  # noqa: BLE001
+        return "numpy"
 
 
 def _slots(q, data):
@@ -272,7 +289,7 @@ OFFTOPIC = ["药", "疼", "病", "感冒", "头疼", "股票", "基金", "彩票
 
 def _reply(text, intent="unknown", chain=None):
     return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": 0.0,
-            "slots": {}, "detail": False, "follow_up": False, "text": text,
+            "backend": intent_backend(), "slots": {}, "detail": False, "follow_up": False, "text": text,
             "chain": chain or ["自研问答引擎"]}
 
 
@@ -318,6 +335,7 @@ def answer(question, context=None, history=None):
         import nlg  # type: ignore
     res = nlg.compose(intent, qt, sl, data)
     return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": round(conf, 2),
+            "backend": intent_backend(),
             "slots": sl, "detail": bool(res.get("detail")), "follow_up": bool(is_follow),
             "text": res["text"], "chain": res["chain"]}
 
