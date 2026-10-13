@@ -1,0 +1,10 @@
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+trainable params: 8,798,208 || all params: 502,830,976 || trainable%: 1.7497
+BASE fact_recall=0.2459
+/home/eric/teacloud/train_lora_d2t.py:133: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss) * a.acc
+epoch 1/2 loss 0.0894
+epoch 2/2 loss 0.0194
+LORA fact_recall=0.7649 (base 0.2459)
+saved -> /home/eric/teacloud/models/qa_d2t_lora

@@ -155,3 +155,19 @@ BERT 在**同一份 74 条分层评测**上比轻量模型高 **16.2 个百分�
 
 ### 9.3 部署
 - 16 类 int8 ONNX（36MB）替换上版，`models/qa_intent_onnx/` 已更新；`/api/ask` 的 `backend` 仍为 `onnx-rbt3-int8`。
+
+## 10. 第六轮：检索增强（RAG）+ LoRA/QLoRA 生成层
+### 10.1 检索增强（BGE 嵌入 → int8 ONNX）
+- 在 16 类语料上重训 `bge-small-zh-v1.5`（对比学习），导出 ONNX：fp32 90MB / **int8 22MB**，检索一致率与 fp32/torch **完全相同（0.774）**。
+- 索引：`data/qa/intents_index.jsonl`（489 条种子问句，含 oos 类）。
+- 引擎接入 `src/qa/retriever.py`：对**低置信/疑似域外**问题用近邻意图做**召回恢复**或**澄清候选**（意图+澄清范式）。
+- **效果（挑战集 45 条，索引外）**：分类器 82.2% → **分类+检索 88.9%**；域外仍由 K+1 拒识。
+
+### 10.2 LoRA/QLoRA 生成层（参数高效微调）
+- 用 **PEFT LoRA**（r=16, α=32，7 个投影层）微调 `Qwen2.5-0.5B-Instruct`，仅 **1.75% 参数可训练**。
+- 评测：**事实数字保持率 24.6%（底座）→ 76.5%（LoRA）**。
+- 结论（诚实）：LoRA 显著提升接地，但仍有约 1/4 数值风险 → **不单独用于生产**；与既有"**多候选 + 事实校验 + 规则回退**"结合使用，生产默认仍为规则引擎。
+
+### 10.3 部署
+- 新增模型：`models/qa_embedder_onnx/model.int8.onnx`（22MB）；`/api/ask` 增加 `retrieval` 字段。
+- 依赖：`onnxruntime`、`tokenizers`（已在 requirements）。

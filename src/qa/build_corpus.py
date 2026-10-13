@@ -299,6 +299,9 @@ def main():
     dump("intents_train.jsonl", train)
     dump("intents_eval.jsonl", ev)
     dump("intents_challenge.jsonl", [{"text": t, "intent": i} for t, i in CHALLENGE])
+    # 检索索引：仅用"种子"問句（无增广噪声），供 RAG/近邻检索与澄清
+    index = [{"text": q, "intent": it} for it, qs in INTENTS.items() for q in dict.fromkeys(qs)]
+    dump("intents_index.jsonl", index)
     with open(os.path.join(QA, "knowledge.json"), "w", encoding="utf-8") as f:
         json.dump(KNOWLEDGE, f, ensure_ascii=False, indent=2)
 

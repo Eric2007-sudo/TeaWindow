@@ -161,6 +161,27 @@ def intent_backend():
         return "numpy"
 
 
+RETR_ADOPT = 0.95     # 检索近邻相似度阈值（BGE 短句余弦普遍偏高，取保守值）
+
+
+def _retrieval_nearest(q, k=3):
+    try:
+        from . import retriever
+    except Exception:  # noqa: BLE001
+        return None
+    if not retriever.available():
+        return None
+    return retriever.nearest(q, k)
+
+
+def retrieval_backend():
+    try:
+        from . import retriever
+        return retriever.backend()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _slots(q, data):
     plots = [p["name"] for p in (data.get("terrain", {}) or {}).get("plots", [])]
     plot = next((p for p in plots if p in q), None)
@@ -289,7 +310,8 @@ OFFTOPIC = ["药", "疼", "病", "感冒", "头疼", "股票", "基金", "彩票
 
 def _reply(text, intent="unknown", chain=None):
     return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": 0.0,
-            "backend": intent_backend(), "slots": {}, "detail": False, "follow_up": False, "text": text,
+            "backend": intent_backend(), "retrieval": retrieval_backend(),
+            "slots": {}, "detail": False, "follow_up": False, "text": text,
             "chain": chain or ["自研问答引擎"]}
 
 
@@ -326,13 +348,29 @@ def answer(question, context=None, history=None):
         intent, conf = strong, max(conf, 0.9)
     elif conf < 0.8 and kw:
         intent, conf = kw, max(conf, 0.8)
-    # K+1 显式域外类：无强关键词命中时，直接拒答/给边界
-    if not strong and not kw and intent == "oos":
-        return _reply("这个问题超出我的能力范围：我只服务梅家坞茶园的气候风险与采摘/养护决策"
-                      "（风险、防冻、灌溉、采摘窗口、保险、开采期等）。其他问题请咨询相应专业人员。",
-                      intent="oos", chain=["拒识: 域外(K+1 分类)"])
-    if not strong and not kw and conf < 0.45:
-        return _reply("我不太确定你的问题。可以这样问：今天有风险吗 / 要不要防冻 / 先采哪块地 / 保险多少钱 / 今年什么时候开采。")
+    # 检索增强（RAG 思路）：低置信/疑似域外时用近邻意图做回退或澄清
+    retr = None
+    if not strong and not kw:
+        retr = _retrieval_nearest(qt)
+        top = retr[0] if retr else None
+        in_scope = bool(top and top["intent"] not in ("oos", "greet") and top["sim"] >= RETR_ADOPT)
+        if intent == "oos":
+            if in_scope:
+                intent, conf = top["intent"], max(conf, 0.55)   # 召回恢复
+            else:
+                return _reply("这个问题超出我的能力范围：我只服务梅家坞茶园的气候风险与采摘/养护决策"
+                              "（风险、防冻、灌溉、采摘窗口、保险、开采期等）。其他问题请咨询相应专业人员。",
+                              intent="oos", chain=["拒识: 域外(K+1 分类)"])
+        elif conf < 0.5:
+            if in_scope:
+                intent, conf = top["intent"], max(conf, 0.55)
+            else:
+                opts = [x for x in (retr or []) if x["intent"] not in ("oos", "greet")]
+                if opts:
+                    cand = "、".join(dict.fromkeys(x["intent"] for x in opts[:2]))
+                    return _reply(f"我不太确定你的问题。你更想问的是：{cand}？"
+                                  "也可以直接问：今天有风险吗 / 要不要防冻 / 先采哪块地 / 保险多少钱一亩。")
+                return _reply("我不太确定你的问题。可以这样问：今天有风险吗 / 要不要防冻 / 先采哪块地 / 保险多少钱 / 今年什么时候开采。")
     sl = _slots(qt, data)
     try:
         from . import nlg
@@ -340,7 +378,7 @@ def answer(question, context=None, history=None):
         import nlg  # type: ignore
     res = nlg.compose(intent, qt, sl, data)
     return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": round(conf, 2),
-            "backend": intent_backend(),
+            "backend": intent_backend(), "retrieval": retrieval_backend(),
             "slots": sl, "detail": bool(res.get("detail")), "follow_up": bool(is_follow),
             "text": res["text"], "chain": res["chain"]}
 

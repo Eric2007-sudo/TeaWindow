@@ -1,0 +1,11 @@
+/home/eric/teacloud/export_embedder_onnx.py:74: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+  torch.onnx.export(net, args, onnx_path, dynamo=False, **kw)
+/home/eric/teacloud/envs/qa/lib/python3.10/site-packages/transformers/modeling_attn_mask_utils.py:196: TracerWarning: torch.tensor results are registered as constants in the trace. You can safely ignore this warning if you use this function to create tensors out of constant variables that would be the same every time you call this function. In any other case, this might cause the trace to be incorrect.
+  inverted_mask = torch.tensor(1.0, dtype=dtype) - expanded_mask
+exported /home/eric/teacloud/models/qa_embedder_onnx/model.onnx 90 MB
+WARNING:root:Please consider to run pre-processing before quantization. Refer to example: https://github.com/microsoft/onnxruntime-inference-examples/blob/main/quantization/image_classification/cpu/ReadMe.md 
+int8 /home/eric/teacloud/models/qa_embedder_onnx/model.int8.onnx 22 MB
+torch retrieval_acc=0.7740
+model.onnx retrieval_acc=0.7740
+model.int8.onnx retrieval_acc=0.7740
+DONE

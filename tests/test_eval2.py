@@ -197,6 +197,20 @@ def test_engine_oos_rejected():
     assert r["intent"] in ("oos", "unknown")
 
 
+# ---------------- 检索增强（RAG 思路） ----------------
+def test_retriever_available_and_nearest():
+    from qa import retriever
+    assert isinstance(retriever.available(), bool)
+    n = retriever.nearest("今天有风险吗", 2)
+    assert n is None or (isinstance(n, list) and len(n) >= 1 and "intent" in n[0] and "sim" in n[0])
+
+
+def test_engine_reports_retrieval_backend():
+    import qa.engine as e
+    r = e.answer("今天有风险吗")
+    assert "retrieval" in r
+
+
 # ---------------- 传感器持久化 / 幂等 / 时间漂移（P1-6、§9） ----------------
 def test_sensor_idempotent(monkeypatch):
     import serve
