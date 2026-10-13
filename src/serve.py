@@ -145,16 +145,26 @@ def _context():
 
 class AskReq(BaseModel):
     question: str
+    engine: str = "own"   # own=自研引擎(默认)；llm=DeepSeek 可选增强
+
+
+def _ask(q, engine):
+    if engine == "llm":
+        r = llm_advice.chat(q, _context())
+        r.setdefault("engine", "deepseek-chat")
+        return r
+    from qa import engine as qa_engine
+    return qa_engine.answer(q, _context())
 
 
 @app.post("/api/ask")
 def ask(req: AskReq):
-    return llm_advice.chat(req.question, _context())
+    return _ask(req.question, req.engine)
 
 
 @app.get("/api/ask")
-def ask_get(q: str):
-    return llm_advice.chat(q, _context())
+def ask_get(q: str, engine: str = "own"):
+    return _ask(q, engine)
 
 
 # ---- 众包物候上报（N4）----

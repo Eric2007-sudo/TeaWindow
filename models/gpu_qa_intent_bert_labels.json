@@ -1,0 +1,1 @@
+{"classes": ["data_source", "decision", "drought", "frost", "greet", "harvest_date", "heat", "insurance", "model", "pick_window", "plot", "rain", "risk_today", "schedule", "value"], "eval_acc": 0.7714285714285715, "model": "bert-base-chinese", "n_train": 580, "n_eval": 35}

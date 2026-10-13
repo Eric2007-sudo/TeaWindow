@@ -11,3 +11,5 @@ __pycache__/
 dist/
 data/raw/
 data/processed/crowd.jsonl
+data/qa/pseudo_labeled.jsonl.bak
+gpu_models/

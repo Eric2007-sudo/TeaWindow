@@ -4,6 +4,7 @@
 输出 report/phenology_validation.md、report/figures/fig_phenology.png
 """
 import os
+import json
 
 import numpy as np
 import pandas as pd
@@ -87,6 +88,21 @@ def main():
     with open(os.path.join(REPORT, "phenology_validation.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(md))
     print("\n".join(md))
+
+    # 注入 web/data.json（供问答引擎与前端使用）
+    try:
+        latest = max(rows, key=lambda r: r["year"])
+        wp = os.path.join(ROOT, "web", "data.json")
+        if os.path.exists(wp):
+            d = json.load(open(wp, encoding="utf-8"))
+            d["phenology"] = {"predicted_date": latest["pred"], "year": latest["year"],
+                              "threshold": thr, "base": base, "start": start, "mae": round(mae, 1)}
+            blob = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+            open(wp, "w", encoding="utf-8").write(blob)
+            open(os.path.join(ROOT, "web", "data.js"), "w", encoding="utf-8").write("window.TW_DATA = " + blob + ";\n")
+            print("-> injected phenology into web/data.json")
+    except Exception as e:  # noqa: BLE001
+        print("注入 phenology 失败:", e)
 
     try:
         import matplotlib

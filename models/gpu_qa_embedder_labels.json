@@ -1,0 +1,1 @@
+{"model": "BAAI/bge-small-zh-v1.5", "retrieval_acc": 0.7714285714285715, "classes": ["data_source", "decision", "drought", "frost", "greet", "harvest_date", "heat", "insurance", "model", "pick_window", "plot", "rain", "risk_today", "schedule", "value"]}
