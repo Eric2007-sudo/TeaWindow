@@ -61,6 +61,11 @@
   const bar = document.getElementById("bar");
   let i = 0, timer = null, playing = true, DUR = 8000, t0 = 0, elapsed = 0;
 
+  // ?slide=N 固定显示第 N 页（用于逐帧录制）；?clean=1 隐藏提示条与进度条
+  const q = new URLSearchParams(location.search);
+  if (q.has("slide")) { i = Math.max(0, Math.min(slides.length - 1, parseInt(q.get("slide")) || 0)); playing = false; }
+  if (q.get("clean") === "1") { bar.style.display = "none"; document.getElementById("hud").style.display = "none"; }
+
   function render(){
     const s = slides[i];
     let html = "";
