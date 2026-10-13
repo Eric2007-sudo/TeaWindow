@@ -48,7 +48,7 @@ def run(do_fetch=True, do_ndvi=True, do_figs=False):
         print(f"[pipeline] 台站订正跳过：{e}")
     _step("build_export", build_export.main)
     # 新颖点：调度 / 决策论 / 价值闭环（读取并回写 data.json）
-    for mod in ("scheduler", "decision", "value"):
+    for mod in ("scheduler", "decision", "value", "index_insurance"):
         try:
             m = __import__(mod)
             _step(mod, m.main)

@@ -150,6 +150,16 @@
       "示意性测算（参数为公开锚点/合理假设）；详见 report/value_chain.md 与 submit/06_商业模式.md。";
   }
 
+  /* ---------------- 天气指数保险 ---------------- */
+  if (D.insurance && D.insurance.series) {
+    document.querySelector("#insTable tbody").innerHTML = D.insurance.series.map(r => `<tr>
+      <td>${r.year}</td><td>${r.frost_index}</td><td>${r.heat_index}</td>
+      <td>${r.payout > 0 ? '<b>' + r.payout + '</b>' : '0'}</td></tr>`).join("");
+    document.getElementById("ins-note").textContent =
+      `触发阈值：霜冻 ${D.insurance.frost_threshold} 度日 / 高温 ${D.insurance.heat_threshold} 天；` +
+      `历史赔付年 ${D.insurance.fire_years}/${D.insurance.n_years}；公平保费≈${D.insurance.fair_premium_per_mu} 元/亩。详见 report/index_insurance.md。`;
+  }
+
   /* ---------------- 预报表格 ---------------- */
   const tb = document.querySelector("#fcTable tbody");
   tb.innerHTML = fc.map(d => `<tr class="fc-row">
