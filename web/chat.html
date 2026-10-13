@@ -41,6 +41,7 @@
 <script>
 const $ = s => document.querySelector(s);
 const log = $("#log");
+const messages = [];   // 多轮上下文
 function add(text, cls, meta, chain){
   const d = document.createElement("div"); d.className = "msg " + cls;
   d.appendChild(document.createTextNode(text));
@@ -56,14 +57,17 @@ async function send(){
   const q = $("#q").value.trim(); if(!q) return;
   add(q, "me"); $("#q").value = "";
   const engine = $("#enh").checked ? "llm" : "own";
+  const history = messages.slice(-8);
+  messages.push({role:"user", content:q});
   try {
     const r = await fetch("api/ask", {method:"POST", headers:{"Content-Type":"application/json"},
-                                      body: JSON.stringify({question:q, engine})});
+                                      body: JSON.stringify({question:q, engine, history})});
     if(!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
     const label = d.engine === "deepseek-chat" ? "引擎：DeepSeek 增强" : "引擎：TeaWindow 自研";
-    const meta = label + (d.intent ? `　意图：${d.intent}（置信 ${d.confidence}）` : "");
+    const meta = label + (d.intent ? `　意图：${d.intent}（置信 ${d.confidence}）` + (d.follow_up ? " · 追问" : "") : "");
     add(d.text, "bot", meta, d.chain);
+    messages.push({role:"assistant", content:d.text});
   } catch(e){
     add("（离线或服务不可用）请通过在线服务访问本页：https://teawindow.onrender.com/chat.html", "bot", "离线降级");
   }

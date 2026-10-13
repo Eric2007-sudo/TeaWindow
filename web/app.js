@@ -19,9 +19,9 @@
 
   /* ---------------- KPI 卡片 ---------------- */
   const today = new Date().toISOString().slice(0, 10);
-  let cur = hist[hist.length - 1];
-  const curNext = hist.find(d => d.date >= today);
-  if (curNext) cur = curNext;
+  let cur = days.find(d => d.date === today)
+         || [...days].reverse().find(d => d.date <= today)
+         || hist[hist.length - 1];
   const next7 = fc.slice(0, 7);
   const maxRisk7 = next7.reduce((a, b) => (b.risk_R > a.risk_R ? b : a), next7[0] || cur);
   const win = D.pick_window[0] || {};

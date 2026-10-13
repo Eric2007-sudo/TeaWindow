@@ -254,23 +254,35 @@ def compose(intent, q, sl, data):
             "chains": ["自研问答引擎"]}
 
 
-def answer(question, context=None):
+def answer(question, context=None, history=None):
     data = _load_data()
-    intent, conf = classify(question)
-    strong = _strong_intent(question)
-    kw = _keyword_intent(question)
+    # 多轮上下文：识别"追问"并继承上一话题/时效
+    prev = ""
+    if history:
+        for m in reversed(history):
+            if m.get("role") == "user":
+                prev = m.get("content", "") or ""
+                break
+    follow_marks = ["呢", "那", "这个", "它", "详细", "展开", "为什么", "依据", "具体", "原因"]
+    is_follow = (len(question) <= 12) and any(t in question for t in follow_marks) and not _strong_intent(question)
+    qt = (question + " " + prev) if (is_follow and prev) else question
+
+    intent, conf = classify(qt)
+    strong = _strong_intent(question) or _strong_intent(qt)
+    kw = _keyword_intent(qt)
     if strong:
         intent, conf = strong, max(conf, 0.9)
     elif conf < 0.8 and kw:
         intent, conf = kw, max(conf, 0.8)
-    sl = _slots(question, data)
+    sl = _slots(qt, data)
     try:
         from . import nlg
     except Exception:  # noqa: BLE001
         import nlg  # type: ignore
-    res = nlg.compose(intent, question, sl, data)
+    res = nlg.compose(intent, qt, sl, data)
     return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": round(conf, 2),
-            "slots": sl, "detail": bool(res.get("detail")), "text": res["text"], "chain": res["chain"]}
+            "slots": sl, "detail": bool(res.get("detail")), "follow_up": bool(is_follow),
+            "text": res["text"], "chain": res["chain"]}
 
 
 if __name__ == "__main__":

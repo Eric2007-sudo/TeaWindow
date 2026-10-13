@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import threading
+import datetime
 
 SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
@@ -35,6 +36,16 @@ def _load():
         raise HTTPException(503, "数据未就绪，请先运行 pipeline 或调用 /api/refresh")
     with open(DATA_JSON, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _cur_day(days):
+    """今天对应的一天：优先日期==今天；否则最近历史日；否则最后一天。"""
+    today = datetime.date.today().isoformat()
+    m = [d for d in days if d["date"] == today]
+    if m:
+        return m[0]
+    past = [d for d in days if d["date"] <= today]
+    return past[-1] if past else days[-1]
 
 
 def _refresh(do_fetch=True):
@@ -67,10 +78,8 @@ def summary():
     forecast = [x for x in days if x["source"] == "forecast"]
     n7 = forecast[:7]
     maxrisk = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else None
-    cur = next((x for x in days if x["source"] == "history"), None)
+    cur = _cur_day(days)
     hist = [x for x in days if x["source"] == "history"]
-    if hist:
-        cur = hist[-1]
     return {
         "updated": d["meta"]["updated"],
         "current": {"date": cur["date"], "risk_level": cur["risk_level"],
@@ -125,7 +134,7 @@ def _context():
     days = d["days"]
     hist = [x for x in days if x["source"] == "history"]
     fc = [x for x in days if x["source"] == "forecast"]
-    cur = hist[-1] if hist else None
+    cur = _cur_day(days)
     n7 = fc[:7]
     mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else None
     dec = d.get("decision") or {}
@@ -146,25 +155,26 @@ def _context():
 class AskReq(BaseModel):
     question: str
     engine: str = "own"   # own=自研引擎(默认)；llm=DeepSeek 可选增强
+    history: list = []    # 多轮上下文：[{role:"user"/"assistant", content: "..."}]
 
 
-def _ask(q, engine):
+def _ask(q, engine, history=None):
     if engine == "llm":
         r = llm_advice.chat(q, _context())
         r.setdefault("engine", "deepseek-chat")
         return r
     from qa import engine as qa_engine
-    return qa_engine.answer(q, _context())
+    return qa_engine.answer(q, _context(), history or [])
 
 
 @app.post("/api/ask")
 def ask(req: AskReq):
-    return _ask(req.question, req.engine)
+    return _ask(req.question, req.engine, req.history)
 
 
 @app.get("/api/ask")
 def ask_get(q: str, engine: str = "own"):
-    return _ask(q, engine)
+    return _ask(q, engine, [])
 
 
 # ---- 众包物候上报（N4）----

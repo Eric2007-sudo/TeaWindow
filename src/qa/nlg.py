@@ -22,27 +22,38 @@ def _pick(items, q, extra=""):
     return items[_seed(q, extra) % len(items)]
 
 
+def current_day(days):
+    today = datetime.date.today().isoformat()
+    m = [d for d in days if d["date"] == today]
+    if m:
+        return m[0]
+    past = [d for d in days if d["date"] <= today]
+    return past[-1] if past else days[-1]
+
+
 def classify_ctx(data, q):
     days = data["days"]
     fc = [d for d in days if d["source"] == "forecast"]
     hist = [d for d in days if d["source"] == "history"]
-    cur = hist[-1]
+    cur = current_day(days)
     H = _horizon(q) or 7
     return {"data": data, "fc": fc, "hist": hist, "cur": cur, "H": H}
 
 
 def _horizon(q):
-    if "一个月" in q or "30天" in q or "1个月" in q:
-        return 30
-    if "半个月" in q or "15天" in q:
-        return 15
-    if "两周" in q or "14天" in q:
-        return 14
-    if "一周" in q or "7天" in q:
-        return 7
     import re
     m = re.search(r"(\d+)\s*天", q)
-    return int(m.group(1)) if m else None
+    if m:
+        return int(m.group(1))
+    if "一个月" in q or "30天" in q or "1个月" in q:
+        return 30
+    if "半个月" in q:
+        return 15
+    if "两周" in q:
+        return 14
+    if "一周" in q:
+        return 7
+    return None
 
 
 def _min_tmin(sub):
