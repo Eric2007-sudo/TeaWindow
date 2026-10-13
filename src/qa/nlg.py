@@ -31,6 +31,43 @@ def current_day(days):
     return past[-1] if past else days[-1]
 
 
+def _day_offset(q):
+    for k, v in [("今天", 0), ("今日", 0), ("明天", 1), ("明日", 1), ("后天", 2), ("大后天", 3)]:
+        if k in q:
+            return v
+    import re
+    cn = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+    m = re.search(r"第([一二两三四五六七八九十0-9]+)天", q)
+    if m:
+        t = m.group(1)
+        return (int(t) - 1) if t.isdigit() else cn.get(t, 0)
+    m = re.search(r"([0-9]+)\s*天后", q)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"([一二两三四五六七八九十]+)\s*天后", q)
+    if m:
+        return cn.get(m.group(1))
+    return None
+
+
+def _focus_day(ctx, q):
+    off = _day_offset(q)
+    if off is None:
+        return None, None
+    target = (datetime.date.today() + datetime.timedelta(days=off)).isoformat()
+    for d in ctx["fc"]:
+        if d["date"] == target:
+            return d, off
+    for d in ctx["hist"]:
+        if d["date"] == target:
+            return d, off
+    return None, off
+
+
+def _day_label(off):
+    return {0: "今天", 1: "明天", 2: "后天", 3: "大后天"}.get(off, f"{off}天后")
+
+
 def classify_ctx(data, q):
     days = data["days"]
     fc = [d for d in days if d["source"] == "forecast"]
@@ -101,6 +138,15 @@ def _months_of(H):
 
 # ---------------------------------------------------------------- 各意图
 def frost(ctx, q, detail):
+    d, off = _focus_day(ctx, q)
+    if d is not None:
+        need = d.get("frost") or d.get("cold_shock")
+        lab = _day_label(off)
+        if need:
+            return (f"{lab}（{d['date']}）有霜冻/倒春寒风险（Tmin {d['tmin']}℃）。"
+                    "夜晨覆盖/熏烟/喷水，达标芽叶优先抢采。", ["数据: Open-Meteo", "模型: 霜冻/倒春寒"])
+        return (f"{lab}（{d['date']}）无霜冻风险：Tmin {d['tmin']}℃，"
+                f"霜冻概率 {d.get('p_frost', 0)}。可正常采。", ["数据: Open-Meteo + 集合", "模型: 霜冻/倒春寒"])
     fc, H = ctx["fc"], ctx["H"]
     sub = fc[:min(H, len(fc))]
     tmin, dmin = _min_tmin(sub)
@@ -126,6 +172,13 @@ def frost(ctx, q, detail):
 
 
 def heat(ctx, q, detail):
+    d, off = _focus_day(ctx, q)
+    if d is not None:
+        lab = _day_label(off)
+        need = (d.get("tmax") or 0) >= 33
+        return (f"{lab}（{d['date']}）{'有高温风险' if need else '无高温风险'}"
+                f"：Tmax {d['tmax']}℃。{'上遮阳网、傍晚浇透水。' if need else '可正常管理。'}",
+                ["数据: Open-Meteo + 集合", "模型: 高温"])
     fc, H = ctx["fc"], ctx["H"]
     sub = fc[:min(H, len(fc))]
     tmax, dmax = _max_tmax(sub)
@@ -376,6 +429,23 @@ def compose(intent, q, sl, data):
         text, chains = HANDLERS[intent](ctx, q, detail)
     elif intent == "risk_today":
         cur, fc, H = ctx["cur"], ctx["fc"], ctx["H"]
+        fd, off = _focus_day(ctx, q)
+        if fd is not None:
+            dom = []
+            if fd.get("frost") or fd.get("cold_shock"):
+                dom.append("霜冻/倒春寒")
+            if fd.get("heat"):
+                dom.append("高温")
+            if (fd.get("dry_run") or 0) >= 5 or (fd.get("deficit") or 0) >= 45:
+                dom.append("干旱/水分")
+            if (fd.get("wet_run") or 0) >= 4:
+                dom.append("连阴雨")
+            lab = _day_label(off)
+            text = f"{lab}（{fd['date']}）：风险 {fd['risk_level']}（R={fd['risk_R']}，适宜度 {int(fd.get('suitability') or 0)}）。" + \
+                   ("主要风险：" + "、".join(dom) + "。" if dom else "无明显主导风险。")
+            if detail:
+                text += " 依据：复合风险 = 倒春寒/高温/干旱 取最大；R≥0.5 记风险日。"
+            return {"text": text, "chain": ["数据: Open-Meteo+集合", "模型: GBDT复合风险"], "detail": detail}
         n7 = fc[:7]
         mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else cur
         dom = []
