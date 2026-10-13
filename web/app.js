@@ -26,20 +26,29 @@
   const maxRisk7 = next7.reduce((a, b) => (b.risk_R > a.risk_R ? b : a), next7[0] || cur);
   const win = D.pick_window[0] || {};
   const m = D.metrics;
+  const riskType = [
+    (cur.frost || cur.cold_shock) ? "霜冻/倒春寒" : null,
+    cur.heat ? "高温" : null,
+    ((cur.dry_run || 0) >= 5 || (cur.deficit || 0) >= 45) ? "干旱/水分" : null,
+    (cur.wet_run || 0) >= 4 ? "连阴雨" : null
+  ].filter(Boolean).join("、") || "无明显主导风险";
+  const ageDays = Math.round((new Date(today) - new Date(cur.date)) / 86400000);
+  const offSeason = D.meta && D.meta.season === "off";
   const cards = [
     { k: "最近研判日风险", v: `<span class="badge b${cur.risk_level}">${cur.risk_level}</span>`,
-      s: `${cur.date} · 风险度 ${(cur.risk_R).toFixed(2)} · 适宜度 ${cur.suitability}` },
+      s: `${cur.date} · R ${(cur.risk_R).toFixed(2)} · 适宜度 ${cur.suitability} · ${riskType}` },
     { k: "未来 7 天最高风险", v: `<span class="badge b${maxRisk7.risk_level}">${maxRisk7.risk_level}</span>`,
       s: `${maxRisk7.date} · 风险度 ${(maxRisk7.risk_R).toFixed(2)}` },
-    { k: "推荐采摘窗口", v: (win.date || "–").slice(5), s: `适宜度 ${fmt(win.suitability)} · 风险 ${win.risk_level || "–"}` },
+    { k: offSeason ? "非春采期（养护为主）" : "推荐采摘窗口",
+      v: offSeason ? "—" : (win.date || "–").slice(5),
+      s: offSeason ? "春采季 3–4 月；当前以防冻/防旱/排涝等养护为主" : `适宜度 ${fmt(win.suitability)} · 风险 ${win.risk_level || "–"}` },
     { k: "今日行动建议", v: (D.decision && D.decision.days && D.decision.days[0]) ? D.decision.days[0].recommend : "–",
       s: `最佳采摘日 ${D.decision ? (D.decision.best_pick_day || "–") : "–"}` }
   ];
-  const staleBanner = ageDays > 2
-    ? `<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据时效</div>
-       <div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据日 ${cur.date}（已 ${ageDays} 天），行动建议请谨慎，以实况与官方预警为准</div></div>`
-    : "";
-  document.getElementById("cards").innerHTML = staleBanner + cards.map(c =>
+  const notes = [];
+  if (ageDays > 2) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据时效</div><div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据日 ${cur.date}（已 ${ageDays} 天），行动建议请谨慎，以实况与官方预警为准</div></div>`);
+  if (offSeason) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#4aa8ff"><div class="k">季节提示</div><div class="v" style="font-size:15px;color:#cfe0ee">当前为非春采期（春采季 3–4 月）：采摘窗口/排班仅供参考，请以园间养护为主</div></div>`);
+  document.getElementById("cards").innerHTML = notes.join("") + cards.map(c =>
     `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="s">${c.s}</div></div>`).join("");
 
   /* ---------------- 图表数据 ---------------- */

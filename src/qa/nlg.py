@@ -166,8 +166,18 @@ def rain(ctx, q, detail):
     return text, chains
 
 
+def _season():
+    """春采季：3–4月（西湖龙井 43 核心）；其余为非春采期。"""
+    m = datetime.date.today().month
+    return "spring" if m in (3, 4) else "off"
+
+
 def pick_window(ctx, q, detail):
     data = ctx["data"]; cur = ctx["cur"]
+    if _season() == "off":
+        return ("当前为非春采期（西湖龙井 43 春采季为 3–4 月），本工具此时以**园间养护**为主："
+                "关注防霜冻/干旱/连阴雨，规划修剪、施肥、清沟与越冬管理，暂不推荐春茶采摘窗口。",
+                ["季节约束: 非春采期"])
     best = data.get("decision", {}).get("best_pick_day", "-")
     wins = data.get("pick_window", [])
     suit = cur.get("suitability", 0)
@@ -180,6 +190,9 @@ def pick_window(ctx, q, detail):
 
 
 def schedule(ctx, q, detail):
+    if _season() == "off":
+        return ("当前为非春采期，暂不提供采摘排班；建议转为**养护排期**："
+                "防冻/防旱/排涝巡查 + 修剪、施肥、清沟与越冬准备。", ["季节约束: 非春采期"])
     sch = (ctx["data"].get("schedule", {}) or {}).get("schedule", [])
     if not sch:
         return "暂无排班数据。", ["模型: 采摘调度"]

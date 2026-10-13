@@ -138,6 +138,7 @@ def main():
         "meta": {
             "site": "梅家坞（西湖龙井核心产区）", "lat": 30.2139, "lon": 120.0961,
             "updated": str(pd.Timestamp.now())[:19],
+            "season": ("spring" if _dt.date.today().month in (3, 4) else "off"),
             "sources": [
                 "Open-Meteo ERA5 历史 + 预报（气象）",
                 "NASA GIBS MODIS_Terra_NDVI_8Day（遥感，颜色近似反演）",
