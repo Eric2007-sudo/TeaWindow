@@ -55,7 +55,7 @@ def run(do_fetch=True, do_ndvi=True, do_figs=False):
         except Exception as e:  # noqa: BLE001
             print(f"[pipeline] {mod} 跳过：{e}")
     # 分析类报告（无网络、较快）
-    for mod in ("counterfactual", "phenology", "model_compare", "recalibrate"):
+    for mod in ("counterfactual", "phenology", "model_compare", "recalibrate", "label_sensitivity"):
         try:
             m = __import__(mod)
             _step(mod, m.main)

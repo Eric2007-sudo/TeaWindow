@@ -62,6 +62,8 @@ TeaWindow/
 │  ├─ backtest_events.py # 真实事件回测（事件级）
 │  ├─ phenology.py       # 物候外部真值：官方开采日 vs GDD 预测
 │  ├─ model_compare.py   # 三模型对照 + 预警提前量
+│  ├─ label_sensitivity.py # 弱标签鲁棒性 + 特征消融
+│  ├─ index_insurance.py # 天气指数保险触发
 │  ├─ scheduler.py       # 采摘调度优化（产能约束下）
 │  ├─ decision.py        # 决策论建议（抢采/等待/防护 期望效用）
 │  ├─ counterfactual.py  # 反事实归因（防护减损）
