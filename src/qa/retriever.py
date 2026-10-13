@@ -77,6 +77,17 @@ def error():
     return _error
 
 
+def debug():
+    _load()
+    d = os.environ.get("TW_RETRIEVER_DIR") or DEFAULT_DIR
+    return {"loaded": _loaded, "backend": _backend, "error": _error,
+            "env": os.environ.get("TW_RETRIEVER"), "dir": d,
+            "has_onnx": os.path.exists(os.path.join(d, "model.int8.onnx")),
+            "has_tok": os.path.exists(os.path.join(d, "tokenizer.json")),
+            "has_idx": os.path.exists(INDEX_PATH),
+            "files": (sorted(os.listdir(d)) if os.path.isdir(d) else "NO_DIR")}
+
+
 def available():
     _load()
     return _Z is not None

@@ -176,12 +176,12 @@ def health():
     try:
         from qa import retriever
         retr = retriever.backend()
-        retr_err = retriever.error()
+        retr_dbg = retriever.debug()
     except Exception as e:  # noqa: BLE001
-        retr, retr_err = None, repr(e)
+        retr, retr_dbg = None, {"error": repr(e)}
     return {"status": "ok", "data_ready": os.path.exists(DATA_JSON),
             "has_llm_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
-            "retrieval": retr, "retrieval_error": retr_err}
+            "retrieval": retr, "retrieval_debug": retr_dbg}
 
 
 @app.get("/api/overview")
