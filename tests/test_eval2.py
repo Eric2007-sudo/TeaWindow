@@ -188,3 +188,54 @@ def test_engine_falls_back_to_numpy(monkeypatch):
     r = e.answer("先采哪块地")
     assert r["text"]
     assert r["backend"] == "numpy"
+
+
+def test_engine_oos_rejected():
+    # K+1 显式域外类：编程/闲聊请求应被拒识（不硬答）
+    import qa.engine as e
+    r = e.answer("帮我写一段 Python 代码")
+    assert r["intent"] in ("oos", "unknown")
+
+
+# ---------------- 传感器持久化 / 幂等 / 时间漂移（P1-6、§9） ----------------
+def test_sensor_idempotent(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "SENSOR_TOKEN", "st")
+    c = _client()
+    body = {"station_id": "T-TEST", "ts": "2026-10-14T08:00:00+08:00", "temp": 16.1}
+    r1 = c.post("/api/sensor", json=body, headers={"X-Sensor-Token": "st"})
+    assert r1.status_code == 200
+    r2 = c.post("/api/sensor", json=body, headers={"X-Sensor-Token": "st"})
+    assert r2.status_code == 200 and r2.json().get("dedup") is True
+
+
+def test_sensor_future_ts_422(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "SENSOR_TOKEN", "st")
+    c = _client()
+    r = c.post("/api/sensor", json={"station_id": "T-FUT", "ts": "2099-01-01T00:00:00+08:00", "temp": 10},
+               headers={"X-Sensor-Token": "st"})
+    assert r.status_code == 422
+
+
+def test_sensor_no_token_query_rejected():
+    c = _client()
+    r = c.post("/api/sensor?token=x", json={"station_id": "T", "ts": "2026-10-14T08:00:00+08:00", "temp": 10})
+    assert r.status_code == 403
+
+
+# ---------------- OpenAPI schema / CSP（评估 §7、§6） ----------------
+def test_openapi_has_response_schemas():
+    c = _client()
+    spec = c.get("/openapi.json").json()
+    ask_schema = spec["paths"]["/api/ask"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    sum_schema = spec["paths"]["/api/summary"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert ask_schema.get("$ref") or ask_schema.get("allOf")
+    assert sum_schema.get("$ref") or sum_schema.get("allOf")
+
+
+def test_csp_no_unsafe_inline_script():
+    c = _client()
+    csp = c.get("/api/health").headers.get("content-security-policy", "")
+    assert "script-src 'self'" in csp
+    assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]

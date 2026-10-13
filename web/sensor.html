@@ -65,31 +65,6 @@ body: {"station_id":"MJW01","ts":&lt;当前ISO时间&gt;,"temp":&lt;SHT31温度&
     <div class="note">字段：station_id, ts(ISO8601) 必填；temp/rh/soil_moisture/soil_temp/precip/wind/light 至少一项。校验：station_id 字母数字_-（≤40），数值范围校验。</div>
   </div>
 </div>
-<script>
-const $ = s => document.querySelector(s);
-$("#ts").value = new Date().toISOString().slice(0,19) + "+08:00";
-$("#send").onclick = async () => {
-  const body = {station_id: $("#sid").value, ts: $("#ts").value};
-  const map = {temp:"temp",rh:"rh",soil_moisture:"soil",precip:"precip",wind:"wind"};
-  for (const [k,id] of Object.entries(map)){ const v=$("#"+id).value; if(v!=="") body[k]=Number(v); }
-  try {
-    const r = await fetch("api/sensor", {method:"POST", headers:{"Content-Type":"application/json","X-Sensor-Token":$("#token").value}, body: JSON.stringify(body)});
-    const d = await r.json();
-    $("#msg").textContent = r.ok ? ("✅ 上报成功，累计 " + d.count + " 条") : ("⚠️ " + (d.detail||r.status));
-  } catch(e){ $("#msg").textContent = "⚠️ 失败（需在线服务）"; }
-};
-async function rt(){
-  try { const d = await (await fetch("api/realtime",{cache:"no-store"})).json();
-    const st = d.stations||{}; const ks=Object.keys(st);
-    $("#rt").innerHTML = ks.length ? ks.map(k=>{const x=st[k];const p=[];
-      if(x.temp!=null)p.push(x.temp+"℃"); if(x.rh!=null)p.push("RH "+x.rh+"%");
-      if(x.soil_moisture!=null)p.push("土湿 "+x.soil_moisture); if(x.precip!=null)p.push("雨 "+x.precip+"mm");
-      return `<span class="kv"><b>${k}</b>：${p.join(" · ")||"–"}（${(x.ts||"").slice(11,16)}）</span>`;}).join("")
-      + `<div class="note" style="margin-top:8px">共 ${d.n} 条 · 更新于 ${d.updated}</div>`
-      : "暂无上报。";
-  } catch(e){ $("#rt").textContent = "（离线或服务不可用）"; }
-}
-rt(); setInterval(rt, 10000);
-</script>
+<script src="sensor.js"></script>
 </body>
 </html>

@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TeaWindow 智能问答</title>
 <style>
-  :root{--bg:#0b1219;--panel:#16212b;--fg:#e8eef3;--muted:#8aa0b2;--line:#243444;--accent:#4aa8ff;--green:#3fb950}
+  :root{--bg:#0b1219;--panel:#16212b;--fg:#e8eef3;--muted:#8aa0b2;--line:#243444;--accent:#4aa8ff;--green:#3fb950;--red:#e5534b}
   *{box-sizing:border-box}
   body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
        font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;height:100vh;display:flex;flex-direction:column}
-  header{padding:14px 20px;border-bottom:1px solid var(--line)}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
   h1{margin:0;font-size:18px} h1 span{color:var(--accent)}
   .sub{color:var(--muted);font-size:12px;margin-top:4px}
   #log{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:10px}
@@ -18,62 +18,40 @@
   .bot{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
   .meta{color:var(--muted);font-size:11px;margin-top:6px}
   .chain{color:var(--green);font-size:11px;margin-top:4px}
+  .typing{align-self:flex-start;color:var(--muted);font-size:13px;padding:6px 10px}
+  .err{border-color:var(--red)}
+  .retry{background:none;border:1px solid var(--line);color:var(--accent);border-radius:8px;font-size:11px;padding:3px 10px;margin-top:6px;cursor:pointer;height:auto}
   .chips{padding:0 18px 8px}
   .chip{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:999px;
-         padding:5px 12px;font-size:12px;color:#bcd0de;margin:3px 6px 3px 0;cursor:pointer}
+         padding:5px 12px;font-size:12px;color:#bcd0de;margin:3px 6px 3px 0;cursor:pointer;font-family:inherit}
+  .chip:hover{border-color:var(--accent)}
   #bar{display:flex;gap:8px;padding:10px 18px 4px;border-top:1px solid var(--line);align-items:center}
   #q{flex:1;background:#0f1a24;border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--fg);font-size:14px}
-  button{background:var(--accent);border:0;border-radius:10px;padding:0 18px;height:44px;color:#06121d;font-weight:700;cursor:pointer}
-  .opt{padding:0 18px 12px;color:var(--muted);font-size:12px}
-  label{user-select:none}
+  #send{background:var(--accent);border:0;border-radius:10px;padding:0 18px;height:44px;color:#06121d;font-weight:700;cursor:pointer}
+  #send[disabled]{opacity:.55;cursor:not-allowed}
+  #clear{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;height:34px;padding:0 12px;cursor:pointer;font-size:12px}
+  .opt{padding:2px 18px 12px;color:var(--muted);font-size:12px}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 </style>
 </head>
 <body>
 <header>
-  <h1>梅坞采候 <span>TeaWindow</span> · 智能问答</h1>
-  <div class="sub">由 <b>TeaWindow 自研引擎</b>驱动（意图识别 → 调用本项目数据与模型 → 接地生成）；可选 DeepSeek 增强</div>
+  <div>
+    <h1>梅坞采候 <span>TeaWindow</span> · 智能问答</h1>
+    <div class="sub">由 <b>TeaWindow 自研引擎</b>驱动（意图识别 → 调用本项目数据与模型 → 接地生成）；可选 DeepSeek 增强</div>
+  </div>
+  <button id="clear" type="button">清空对话</button>
 </header>
-<div id="log"></div>
-<div class="chips" id="chips"></div>
-<div id="bar"><input id="q" placeholder="输入你的问题…"><button id="send">发送</button></div>
-<div class="opt"><label><input type="checkbox" id="enh"> 使用 DeepSeek 增强（仅表述，不作为智力来源）</label></div>
-
-<script>
-const $ = s => document.querySelector(s);
-const log = $("#log");
-const messages = [];   // 多轮上下文
-function add(text, cls, meta, chain){
-  const d = document.createElement("div"); d.className = "msg " + cls;
-  d.appendChild(document.createTextNode(text));
-  if (meta){ const m=document.createElement("div"); m.className="meta"; m.textContent = meta; d.appendChild(m); }
-  if (chain) { const c=document.createElement("div"); c.className="chain"; c.textContent = "来源链：" + chain.join(" → "); d.appendChild(c); }
-  log.appendChild(d); log.scrollTop = log.scrollHeight;
-}
-const suggestions = ["今天有风险吗？","要不要防冻？","先采哪块地？","保险多少钱一亩？","今年什么时候开采？","你们用什么模型？"];
-$("#chips").innerHTML = suggestions.map(t=>`<span class="chip">${t}</span>`).join("");
-document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{ $("#q").value=c.textContent; send(); });
-
-async function send(){
-  const q = $("#q").value.trim(); if(!q) return;
-  add(q, "me"); $("#q").value = "";
-  const engine = $("#enh").checked ? "llm" : "own";
-  const history = messages.slice(-8);
-  messages.push({role:"user", content:q});
-  try {
-    const r = await fetch("api/ask", {method:"POST", headers:{"Content-Type":"application/json"},
-                                      body: JSON.stringify({question:q, engine, history})});
-    if(!r.ok) throw new Error("HTTP " + r.status);
-    const d = await r.json();
-    const label = d.engine === "deepseek-chat" ? "引擎：DeepSeek 增强" : "引擎：TeaWindow 自研";
-    const meta = label + (d.intent ? `　意图：${d.intent}（置信 ${d.confidence}）` + (d.follow_up ? " · 追问" : "") : "");
-    add(d.text, "bot", meta, d.chain);
-    messages.push({role:"assistant", content:d.text});
-  } catch(e){
-    add("（离线或服务不可用）请通过在线服务访问本页：https://teawindow.onrender.com/chat.html", "bot", "离线降级");
-  }
-}
-$("#send").onclick = send;
-$("#q").addEventListener("keydown", e=>{ if(e.key==="Enter") send(); });
-</script>
+<div id="log" role="log" aria-live="polite" aria-relevant="additions" aria-label="对话记录"></div>
+<div class="chips" id="chips" aria-label="快捷问题"></div>
+<form id="bar" autocomplete="off">
+  <label class="sr-only" for="q">请输入你的问题</label>
+  <input id="q" name="q" placeholder="输入你的问题…" aria-describedby="hint">
+  <button id="send" type="submit">发送</button>
+</form>
+<div class="opt">
+  <label id="hint"><input type="checkbox" id="enh"> 使用 DeepSeek 增强（仅表述，不作为智力来源）</label>
+</div>
+<script src="chat.js"></script>
 </body>
 </html>

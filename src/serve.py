@@ -19,9 +19,10 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request  # noqa: E4
 import time as _time  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+from pydantic import BaseModel, Field, ConfigDict  # noqa: E402
 
 import llm_advice  # noqa: E402  (触发 .env 加载)
+import store  # noqa: E402  (SQLite 持久化：上报/传感器)
 
 WEB = os.path.join(ROOT, "web")
 DATA_JSON = os.path.join(WEB, "data.json")
@@ -65,6 +66,34 @@ def _llm_spend():
     return True
 
 
+# ---- OpenAPI 响应模型（见评估 §7：200 响应需有 schema）----
+class SummaryResp(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    updated: str
+    season: str
+    data_age_days: int | None = None
+    current: dict | None = None
+    next7_max: dict | None = None
+    pick_window: list = Field(default_factory=list)
+    pick_window_note: str | None = None
+    metrics: dict = Field(default_factory=dict)
+
+
+class AskResp(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    engine: str = "teawindow-own"
+    mode: str | None = None
+    intent: str | None = None
+    confidence: float | None = None
+    backend: str | None = None
+    text: str
+    chain: list = Field(default_factory=list)
+    follow_up: bool = False
+    source: str | None = None
+    base_text: str | None = None
+    note: str | None = None
+
+
 def _load():
     if not os.path.exists(DATA_JSON):
         raise HTTPException(503, "数据未就绪，请先运行 pipeline 或调用 /api/refresh")
@@ -93,6 +122,10 @@ def _rate_limit(ip, limit=40, window=60):
         raise HTTPException(429, "rate limit exceeded, retry later")
     arr.append(now)
     _RL[ip] = arr
+    # 防内存无限增长：仅在字典过大时清理过期来源键
+    if len(_RL) > 10000:
+        for k in [k for k, v in list(_RL.items()) if not v or now - v[-1] > window]:
+            _RL.pop(k, None)
 
 
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
@@ -121,8 +154,8 @@ async def _guard_and_headers(request, call_next):
     resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     resp.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'")
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
     return resp
 
 
@@ -149,7 +182,7 @@ def overview():
     return JSONResponse(_load())
 
 
-@app.get("/api/summary")
+@app.get("/api/summary", response_model=SummaryResp)
 def summary():
     d = _load()
     days = d["days"]
@@ -271,7 +304,7 @@ def _ask(q, engine, history=None):
     return base
 
 
-@app.post("/api/ask")
+@app.post("/api/ask", response_model=AskResp)
 def ask(request: Request, req: AskReq):
     if req.engine not in ("own", "llm"):
         raise HTTPException(422, "engine must be 'own' or 'llm'")
@@ -286,7 +319,7 @@ def ask(request: Request, req: AskReq):
     return _ask(req.question.strip(), req.engine, hist)
 
 
-@app.get("/api/ask")
+@app.get("/api/ask", response_model=AskResp)
 def ask_get(request: Request, q: str, engine: str = "own"):
     if engine not in ("own", "llm"):
         raise HTTPException(422, "engine must be 'own' or 'llm'")
@@ -303,7 +336,7 @@ def ask_get(request: Request, q: str, engine: str = "own"):
 
 
 # ---- 众包物候上报（N4）----
-CROWD = os.path.join(ROOT, "data", "processed", "crowd.jsonl")
+KINDS = {"开采", "倒春寒/霜冻", "高温灼伤", "连阴雨", "其他"}
 
 
 class ReportReq(BaseModel):
@@ -311,9 +344,6 @@ class ReportReq(BaseModel):
     plot: str = ""
     kind: str = ""   # 开采 / 受冻 / 灼伤 / 其他
     note: str = ""
-
-
-KINDS = {"开采", "倒春寒/霜冻", "高温灼伤", "连阴雨", "其他"}
 
 
 @app.post("/api/report")
@@ -330,29 +360,23 @@ def report(request: Request, req: ReportReq):
     rec = {"ts": _dt.datetime.now().isoformat(timespec="seconds"),
            "date": req.date[:10], "plot": (req.plot or "")[:40],
            "kind": req.kind, "note": (req.note or "")[:200]}
-    os.makedirs(os.path.dirname(CROWD), exist_ok=True)
-    with open(CROWD, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    n = sum(1 for _ in open(CROWD, encoding="utf-8"))
+    n = store.add_report(rec)
     return {"status": "ok", "count": n}
 
 
 @app.get("/api/reports")
 def reports(request: Request):
     _require_admin(request)   # P1-2：上报内容默认不公开
-    if not os.path.exists(CROWD):
-        return {"count": 0, "items": []}
-    items = [json.loads(l) for l in open(CROWD, encoding="utf-8") if l.strip()]
-    return {"count": len(items), "items": items[-50:]}
+    items = store.list_reports(50)
+    return {"count": len(items), "items": items}
 
 
 # ---- 传感器数据接入（第三方硬件上报）----
-POINTS = os.path.join(ROOT, "data", "points")
-SENSOR_LOG = os.path.join(POINTS, "sensor.jsonl")
 SENSOR_TOKEN = os.environ.get("SENSOR_TOKEN", "")
-_SENSOR_FIELDS = ("temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light")
+_SENSOR_FIELDS = ("temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
 _SENSOR_RANGE = {"temp": (-30, 60), "rh": (0, 100), "soil_moisture": (0, 1),
-                 "soil_temp": (-30, 60), "precip": (0, 500), "wind": (0, 80), "light": (0, 200000)}
+                 "soil_temp": (-30, 60), "precip": (0, 500), "wind": (0, 80),
+                 "light": (0, 200000), "vpd": (0, 10)}
 
 
 class SensorReq(BaseModel):
@@ -365,6 +389,7 @@ class SensorReq(BaseModel):
     precip: float | None = None
     wind: float | None = None
     light: float | None = None
+    vpd: float | None = None
     note: str = ""
 
 
@@ -387,9 +412,13 @@ def _valid_sensor(req):
     if not _re.fullmatch(r"[A-Za-z0-9_\-]{1,40}", sid):
         raise HTTPException(422, "station_id must match [A-Za-z0-9_-]{1,40}")
     try:
-        datetime.datetime.fromisoformat(req.ts.replace("Z", "+00:00"))
+        dt = datetime.datetime.fromisoformat(req.ts.replace("Z", "+00:00"))
     except Exception:  # noqa: BLE001
         raise HTTPException(422, "ts must be ISO8601")
+    # 时间漂移校验：不接受超前 2 天以上的设备时间（防重放/时钟错误）
+    now = datetime.datetime.now(dt.tzinfo) if dt.tzinfo else datetime.datetime.now()
+    if dt > now + datetime.timedelta(days=2):
+        raise HTTPException(422, "ts is too far in the future (device clock drift?)")
     rec = {"ts": req.ts[:32], "station_id": sid, "received": datetime.datetime.now().isoformat(timespec="seconds")}
     n = 0
     for f in _SENSOR_FIELDS:
@@ -407,22 +436,13 @@ def _valid_sensor(req):
     return rec
 
 
-def _append_sensor(recs):
-    os.makedirs(POINTS, exist_ok=True)
-    with open(SENSOR_LOG, "a", encoding="utf-8") as f:
-        for r in recs:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    n = sum(1 for _ in open(SENSOR_LOG, encoding="utf-8"))
-    return n
-
-
 @app.post("/api/sensor")
 def sensor(request: Request, req: SensorReq):
     _require_sensor(request)
     ip = request.client.host if request.client else "global"
     _rate_limit(ip, limit=int(os.environ.get("SENSOR_RPM", "120")))
-    n = _append_sensor([_valid_sensor(req)])
-    return {"status": "ok", "count": n}
+    accepted, n = store.add_sensor([_valid_sensor(req)])
+    return {"status": "ok", "accepted": accepted, "count": n, "dedup": accepted == 0}
 
 
 @app.post("/api/sensor/batch")
@@ -437,38 +457,31 @@ def sensor_batch(request: Request, req: SensorBatch):
         if not isinstance(r, dict):
             raise HTTPException(422, "each reading must be an object")
         recs.append(_valid_sensor(SensorReq(**r)))
-    n = _append_sensor(recs)
-    return {"status": "ok", "accepted": len(recs), "count": n}
+    accepted, n = store.add_sensor(recs)
+    return {"status": "ok", "accepted": accepted, "count": n}
 
 
 @app.get("/api/realtime")
 def realtime():
     """公开只读：各站最新观测（仅数值，无备注/隐私），供仪表盘实时刷新。"""
-    if not os.path.exists(SENSOR_LOG):
-        return {"updated": None, "n": 0, "stations": {}}
-    items = [json.loads(l) for l in open(SENSOR_LOG, encoding="utf-8") if l.strip()]
-    latest = {}
-    for r in items:
-        latest[r["station_id"]] = r
-    keep = ("ts", "temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light")
-    pub = {sid: {k: r.get(k) for k in keep if k in r} for sid, r in latest.items()}
+    latest = store.sensor_latest()
+    keep = ("ts", "temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
+    pub = {sid: {k: r.get(k) for k in keep if r.get(k) is not None} for sid, r in latest.items()}
     return {"updated": datetime.datetime.now().isoformat(timespec="seconds"),
-            "n": len(items), "stations": pub}
+            "n": store.sensor_count(), "stations": pub}
 
 
 @app.get("/api/sensor/latest")
 def sensor_latest(request: Request, station_id: str = "", limit: int = 20):
     _require_sensor(request)
-    if not os.path.exists(SENSOR_LOG):
-        return {"count": 0, "latest": {}, "items": []}
-    items = [json.loads(l) for l in open(SENSOR_LOG, encoding="utf-8") if l.strip()]
-    if station_id:
-        items = [r for r in items if r.get("station_id") == station_id]
+    items = store.sensor_items(station_id, limit)
     latest = {}
     for r in items:
-        latest[r["station_id"]] = r
-    return {"count": len(items), "stations": sorted(latest.keys()),
-            "latest": latest, "items": items[-max(1, min(limit, 200)):]}
+        sid = r.get("station_id")
+        if sid and (sid not in latest or str(r.get("ts")) > str(latest[sid].get("ts"))):
+            latest[sid] = r
+    return {"count": store.sensor_count(), "stations": sorted(latest.keys()),
+            "latest": latest, "items": items}
 
 
 # ---- 物候/灾情上报（众包）已在上方 /api/report ----

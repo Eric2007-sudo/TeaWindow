@@ -16,3 +16,6 @@ gpu_models/
 admin_token.txt
 data/points/
 data/qa/*.bak
+data/teawindow.db
+data/teawindow.db-wal
+data/teawindow.db-shm

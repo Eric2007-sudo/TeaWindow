@@ -326,6 +326,11 @@ def answer(question, context=None, history=None):
         intent, conf = strong, max(conf, 0.9)
     elif conf < 0.8 and kw:
         intent, conf = kw, max(conf, 0.8)
+    # K+1 显式域外类：无强关键词命中时，直接拒答/给边界
+    if not strong and not kw and intent == "oos":
+        return _reply("这个问题超出我的能力范围：我只服务梅家坞茶园的气候风险与采摘/养护决策"
+                      "（风险、防冻、灌溉、采摘窗口、保险、开采期等）。其他问题请咨询相应专业人员。",
+                      intent="oos", chain=["拒识: 域外(K+1 分类)"])
     if not strong and not kw and conf < 0.45:
         return _reply("我不太确定你的问题。可以这样问：今天有风险吗 / 要不要防冻 / 先采哪块地 / 保险多少钱 / 今年什么时候开采。")
     sl = _slots(qt, data)

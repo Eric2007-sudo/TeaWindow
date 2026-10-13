@@ -1,7 +1,7 @@
 # 自研问答意图分类器（本机 numpy）
 
-- 类别 15；训练 2051，评测 125，挑战集 45；字符 1-2gram 特征 2142 维。
-- **评测准确率 = 76.8%**；挑战集准确率 = 82.2%
+- 类别 16；训练 2401，评测 146，挑战集 45；字符 1-2gram 特征 2714 维。
+- **评测准确率 = 74.7%**；挑战集准确率 = 73.3%
 
 ## 各类分布（评测集）
 - data_source: 8 条
@@ -13,6 +13,7 @@
 - heat: 9 条
 - insurance: 8 条
 - model: 8 条
+- oos: 21 条
 - pick_window: 8 条
 - plot: 8 条
 - rain: 8 条
@@ -21,15 +22,15 @@
 - value: 8 条
 
 ## 样例预测
-- “谢谢你了” → greet（真值 greet）✓
-- “为什么用机器学习” → harvest_date（真值 model）✗
-- “今天需要注意什么风险” → risk_today（真值 risk_today）✓
-- “防灾划算吗” → value（真值 value）✓
-- “开采期大概几号” → harvest_date（真值 harvest_date）✓
-- “北坡的茶园要注意啥” → plot（真值 plot）✓
-- “你们的数据从哪来的” → data_source（真值 data_source）✓
-- “用这个能减多少损” → value（真值 value）✓
-- “会不会持续高温” → heat（真值 heat）✓
-- “今天要不要注意点啥” → risk_today（真值 risk_today）✓
-- “雨水多要不要开沟” → rain（真值 rain）✓
-- “嫩芽会不会被冻” → frost（真值 frost）✓
+- “会不会有晚霜” → frost（真值 frost）✓
+- “什么时候采最好” → pick_window（真值 pick_window）✓
+- “彩票怎么买” → oos（真值 oos）✓
+- “要不要等两天再采” → decision（真值 decision）✓
+- “每亩能省多少” → value（真值 value）✓
+- “低温冻害严不严重” → frost（真值 frost）✓
+- “是不是该灌溉了” → decision（真值 drought）✗
+- “怎么申请信用卡” → oos（真值 oos）✓
+- “这两天适不适合采摘” → pick_window（真值 pick_window）✓
+- “有没有卫星数据” → data_source（真值 data_source）✓
+- “明前采摘窗口” → pick_window（真值 pick_window）✓
+- “孩子发烧了怎么办” → oos（真值 oos）✓

@@ -129,3 +129,29 @@ BERT 在**同一份 74 条分层评测**上比轻量模型高 **16.2 个百分�
   `requirements.txt` 增 `onnxruntime`、`tokenizers`。
 - `/api/ask` 响应新增 `backend` 字段（`onnx-rbt3-int8` 或 `numpy`）。
 - 校验：`tests/test_eval2.py` 覆盖后端可用性、类别一致与**回退路径**。
+
+## 9. 第五轮：开源范式落地（OOS K+1 / RAG 思路 / Guardrails）
+> 先上网调研开源问答训练范式，再据此训练。参考：EMNLP'24《Searching for Best Practices in RAG》（查询分类→检索、混合检索、重排）、
+> QLoRA 论文与 LoRA/QLoRA 实践（参数高效微调）、EACL'26《Intent Classification with Clarification》与 OOS 数据集论文（K+1/软标签/fallback 阈值）、
+> NeMo Guardrails（hallucination rail / fallback）。
+
+### 9.1 显式域外类（OOS，K+1）
+- 在 15 类基础上新增 **`oos` 类**（域外：医疗/金融/编程/闲聊/乱码/英文等 100+ 例），采用 **K+1 + 软标签** 思路训练。
+- 引擎：命中 OOS 且无强关键词 → **明确拒答/给边界**（不再低置信硬答）。
+
+| 模型 | 评测（146，含 oos） | 挑战集（45，域内泛化） |
+|---|---|---|
+| numpy 兜底（16 类） | 74.7% | 73.3% |
+| **rbt3 学生 fp32（16 类）** | **94.5%** | **93.3%** |
+| rbt3 学生 int8（部署） | 89.0% | — |
+| 教师 RoBERTa-wwm-ext | 94.5% | 95.6% |
+
+- 结论：加入 OOS 后域内精度不降反升（教师挑战集 88.9%→**95.6%**）；int8 有约 5.5pt 量化损失（受新增 OOS 边界影响），仍显著优于 numpy。
+
+### 9.2 RAG / Guardrails 思路
+- **RAG 最佳实践**（查询分类→是否检索、混合检索、重排）用于指导"先判定是否为域内可答、再接地生成"的流程；本项目以**结构化事实模板 + 来源链**替代重型向量库，保证可审计。
+- **Guardrails/fallback**：OOS 拒识 + 低置信澄清 + LLM 润色失败回退，等价于 hallucination rail。
+- **LoRA/QLoRA**：作为后续对生成层（D2T）的参数高效微调方案记录在路线图（当前生产用规则，避免事实风险）。
+
+### 9.3 部署
+- 16 类 int8 ONNX（36MB）替换上版，`models/qa_intent_onnx/` 已更新；`/api/ask` 的 `backend` 仍为 `onnx-rbt3-int8`。
