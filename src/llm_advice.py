@@ -136,6 +136,41 @@ def ctx_from_row(row):
     }
 
 
+CHAT_SYSTEM = (
+    "你是'梅坞采候 TeaWindow'的茶农问答助手，服务杭州梅家坞西湖龙井核心产区。"
+    "只依据给定的实时数据上下文回答；数据不足就直说。"
+    "要求：先给结论，再给1-3条可执行动作；口语化、简洁（≤180字）；涉及灾害提醒不确定性；不编造数据。"
+)
+
+
+def chat(question, context):
+    """对话式问答。返回 {source, text}。context 为已整理的实时数据摘要(dict)。"""
+    if requests and os.environ.get("DEEPSEEK_API_KEY"):
+        prompt = ("【茶农问题】" + str(question)[:500] +
+                  "\n\n【实时数据(JSON)】\n" + json.dumps(context, ensure_ascii=False) +
+                  "\n\n请直接回答【茶农问题】，不要复述数据。")
+        try:
+            r = requests.post(API_URL, timeout=60,
+                              headers={"Authorization": "Bearer " + os.environ["DEEPSEEK_API_KEY"],
+                                       "Content-Type": "application/json"},
+                              json={"model": MODEL,
+                                    "messages": [{"role": "system", "content": CHAT_SYSTEM},
+                                                 {"role": "user", "content": prompt}],
+                                    "temperature": 0.3, "max_tokens": 400})
+            r.raise_for_status()
+            return {"source": "deepseek-chat", "text": r.json()["choices"][0]["message"]["content"].strip()}
+        except Exception as e:  # noqa: BLE001
+            print("  [chat] 调用失败，用规则后备:", e)
+    # 规则后备
+    cur = context.get("current", {})
+    n7 = context.get("next7_max", {})
+    best = context.get("best_pick_day", "-")
+    txt = (f"根据当前数据：今日风险{cur.get('risk_level', '未知')}（适宜度{cur.get('suitability', '-')}），"
+           f"未来7天最高风险在 {n7.get('date', '-')}（{n7.get('risk_level', '-')}）。"
+           f"建议最佳采摘日：{best}。请结合田间实际与最新官方预报判断。")
+    return {"source": "rule_fallback", "text": txt}
+
+
 if __name__ == "__main__":
     demo = {"date": "2026-04-12", "risk_level": "高", "risk_type": "倒春寒/霜冻", "tmin": 1.5,
             "frost": 1, "cold_shock": 1, "suitability": 35, "risk_R": 0.7}

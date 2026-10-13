@@ -10,3 +10,4 @@ __pycache__/
 *.log
 dist/
 data/raw/
+data/processed/crowd.jsonl

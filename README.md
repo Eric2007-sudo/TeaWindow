@@ -63,6 +63,10 @@ TeaWindow/
 │  ├─ phenology.py       # 物候外部真值：官方开采日 vs GDD 预测
 │  ├─ model_compare.py   # 三模型对照 + 预警提前量
 │  ├─ scheduler.py       # 采摘调度优化（产能约束下）
+│  ├─ decision.py        # 决策论建议（抢采/等待/防护 期望效用）
+│  ├─ counterfactual.py  # 反事实归因（防护减损）
+│  ├─ value.py           # 价值闭环（预期损失/保费/减损）
+│  ├─ recalibrate.py     # 众包物候闭环（复校 GDD 阈值）
 │  ├─ llm_advice.py      # DeepSeek 白话建议（带规则后备）
 │  ├─ pipeline.py · serve.py · build_export.py · make_figs.py · make_qr.py · deploy_render.py
 ├─ tests/                # pytest 单元测试
@@ -73,7 +77,7 @@ TeaWindow/
 ├─ research/             # 调研：一手数据方案/证据台账/信息公开/合作/自建传感器
 ├─ deploy/               # Dockerfile · Procfile · render.yaml · 上线清单
 ├─ .github/workflows/    # pages.yml · refresh.yml · test.yml
-└─ web/ index.html app.js data.js chart.umd.min.js demo.html(demo_assets/) links.html(QR)   # 仪表盘 + 演示 + 分享页
+└─ web/ index.html app.js data.js chart.umd.min.js demo.html links.html chat.html report.html (demo_assets/)
 ```
 
 ## 4. 快速开始

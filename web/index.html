@@ -57,6 +57,12 @@
     <h1>梅坞采候 <span>TeaWindow</span></h1>
     <div class="sub">梅家坞（西湖龙井核心产区）· 龙井 43 号「倒春寒 × 高温」复合风险预警与采摘窗口决策助手</div>
     <div class="sub" id="hdr-meta"></div>
+    <div class="sub" style="margin-top:8px">
+      <a class="pill" href="chat.html">智能问答</a>
+      <a class="pill" href="report.html">物候上报</a>
+      <a class="pill" href="links.html">扫码分享</a>
+      <a class="pill" href="demo.html">自播放演示</a>
+    </div>
   </div>
 </header>
 <div class="wrap">
@@ -101,6 +107,23 @@
       </table>
       </div>
       <div class="note" id="sched-note"></div>
+    </div>
+
+    <div class="panel">
+      <h2>决策建议（期望效用：抢采 / 等待 / 防护）</h2>
+      <div style="overflow:auto">
+      <table id="decTable">
+        <thead><tr><th>日期</th><th>灾害概率</th><th>抢采EV</th><th>防护EV</th><th>等待EV</th><th>建议</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="note" id="dec-note"></div>
+    </div>
+
+    <div class="panel">
+      <h2>价值闭环（风险 → 预期损失 / 保费）</h2>
+      <div class="cards" id="valueCards" style="margin:0"></div>
+      <div class="note" id="value-note"></div>
     </div>
 
     <div class="panel">

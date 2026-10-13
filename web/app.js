@@ -126,6 +126,30 @@
       `${D.schedule.method} 每日产能 ${D.schedule.capacity_per_day} 个地块。<br>抢采优先级：${pr}`;
   }
 
+  /* ---------------- 决策建议（期望效用） ---------------- */
+  if (D.decision && D.decision.days) {
+    const badge = a => `<span class="badge b${a === "抢采" ? "低" : (a === "防护" ? "中" : "高")}">${a}</span>`;
+    document.querySelector("#decTable tbody").innerHTML = D.decision.days.map(d => `<tr>
+      <td>${d.date}</td><td>${(d.p_hazard * 100).toFixed(0)}%</td>
+      <td>${d.ev_pick}</td><td>${d.ev_protect}</td><td>${d.ev_wait}</td><td>${badge(d.recommend)}</td></tr>`).join("");
+    document.getElementById("dec-note").textContent =
+      `${D.decision.method} 最佳采摘日：${D.decision.best_pick_day}。`;
+  }
+
+  /* ---------------- 价值闭环 ---------------- */
+  if (D.value) {
+    const v = D.value;
+    document.getElementById("valueCards").innerHTML = [
+      { k: "霜冻致损年概率", v: (v.p_frost * 100).toFixed(0) + "%" },
+      { k: "高温致损年概率", v: (v.p_heat * 100).toFixed(0) + "%" },
+      { k: "预期损失", v: "¥" + v.expected_loss_per_mu + "/亩·年" },
+      { k: "参考保费", v: "¥" + v.premium_per_mu + "/亩" },
+      { k: "工具减损价值", v: "¥" + v.tool_benefit_per_mu + "/亩·年" }
+    ].map(c => `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join("");
+    document.getElementById("value-note").textContent =
+      "示意性测算（参数为公开锚点/合理假设）；详见 report/value_chain.md 与 submit/06_商业模式.md。";
+  }
+
   /* ---------------- 预报表格 ---------------- */
   const tb = document.querySelector("#fcTable tbody");
   tb.innerHTML = fc.map(d => `<tr class="fc-row">

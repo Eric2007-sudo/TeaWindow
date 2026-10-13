@@ -16,6 +16,7 @@ sys.path.insert(0, SRC)
 from fastapi import FastAPI, HTTPException, BackgroundTasks  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
 import llm_advice  # noqa: E402  (触发 .env 加载)
 
@@ -116,6 +117,75 @@ def _to_serieslike(row):
     for k in ("frost", "cold_shock", "heat", "heat_severe", "dry_run", "wet_run", "risk_R", "suitability"):
         r[k] = row.get(k, 0) or 0
     return r
+
+
+# ---- 对话式问答（N3）----
+def _context():
+    d = _load()
+    days = d["days"]
+    hist = [x for x in days if x["source"] == "history"]
+    fc = [x for x in days if x["source"] == "forecast"]
+    cur = hist[-1] if hist else None
+    n7 = fc[:7]
+    mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else None
+    dec = d.get("decision") or {}
+    sch = (d.get("schedule") or {}).get("schedule", [])
+    return {
+        "current": ({"date": cur["date"], "risk_level": cur.get("risk_level"),
+                     "risk_R": cur.get("risk_R"), "suitability": cur.get("suitability")} if cur else None),
+        "next7_max": ({"date": mx["date"], "risk_level": mx.get("risk_level"),
+                       "risk_R": mx.get("risk_R")} if mx else None),
+        "pick_window": d.get("pick_window", []),
+        "best_pick_day": dec.get("best_pick_day"),
+        "schedule": [{"date": s["date"], "plots": [p["name"] for p in s["plots"]]} for s in sch],
+        "metrics_auc": (d.get("metrics", {}).get("ml", {}) or {}).get("auc"),
+        "value": d.get("value"),
+    }
+
+
+class AskReq(BaseModel):
+    question: str
+
+
+@app.post("/api/ask")
+def ask(req: AskReq):
+    return llm_advice.chat(req.question, _context())
+
+
+@app.get("/api/ask")
+def ask_get(q: str):
+    return llm_advice.chat(q, _context())
+
+
+# ---- 众包物候上报（N4）----
+CROWD = os.path.join(ROOT, "data", "processed", "crowd.jsonl")
+
+
+class ReportReq(BaseModel):
+    date: str
+    plot: str = ""
+    kind: str = ""   # 开采 / 受冻 / 灼伤 / 其他
+    note: str = ""
+
+
+@app.post("/api/report")
+def report(req: ReportReq):
+    import datetime as _dt
+    os.makedirs(os.path.dirname(CROWD), exist_ok=True)
+    rec = {"ts": _dt.datetime.now().isoformat(timespec="seconds"), "date": req.date,
+           "plot": req.plot, "kind": req.kind, "note": req.note}
+    with open(CROWD, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    n = sum(1 for _ in open(CROWD, encoding="utf-8"))
+    return {"status": "ok", "count": n}
+
+
+@app.get("/api/reports")
+def reports():
+    if not os.path.exists(CROWD):
+        return {"count": 0, "items": []}
+    items = [json.loads(l) for l in open(CROWD, encoding="utf-8") if l.strip()]
+    return {"count": len(items), "items": items[-50:]}
 
 
 @app.post("/api/refresh")

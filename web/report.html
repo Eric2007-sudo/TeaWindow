@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeaWindow 物候上报（众包）</title>
+<style>
+  :root{--bg:#0b1219;--panel:#16212b;--fg:#e8eef3;--muted:#8aa0b2;--line:#243444;--accent:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  .wrap{max-width:720px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-size:20px;margin:0 0 4px} h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  label{display:block;font-size:13px;color:#cfe0ee;margin:10px 0 4px}
+  input,select,textarea{width:100%;background:#0f1a24;border:1px solid var(--line);border-radius:8px;
+       padding:10px;color:var(--fg);font-size:14px}
+  button{margin-top:14px;background:var(--accent);border:0;border-radius:10px;padding:10px 20px;color:#06121d;font-weight:700;cursor:pointer}
+  .note{color:var(--muted);font-size:12px;margin-top:14px}
+  #recs{margin-top:16px;font-size:13px;color:#bcd0de}
+  .pill{display:inline-block;background:#0f1a24;border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin:2px 4px 2px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>梅坞采候 <span>TeaWindow</span> · 物候/灾情上报</h1>
+  <div class="sub">茶农上报真实开采日、受冻/灼伤等，用于<b>众包闭环</b>校准模型（去标识化，仅用于科研）。</div>
+  <div class="card">
+    <label>日期</label><input type="date" id="date">
+    <label>地块（可选）</label><select id="plot"><option value="">（不指定）</option></select>
+    <label>类型</label>
+    <select id="kind">
+      <option>开采</option><option>倒春寒/霜冻</option><option>高温灼伤</option><option>连阴雨</option><option>其他</option>
+    </select>
+    <label>备注（可选，≤100字）</label><textarea id="note" rows="2" maxlength="100"></textarea>
+    <button id="submit">提交上报</button>
+    <div class="note" id="msg"></div>
+    <div id="recs"></div>
+  </div>
+  <div class="note">说明：本页需连接后端服务（在线模式）。数据将写入服务器的众包台账，并用于 `src/recalibrate.py` 复校 GDD 阈值。</div>
+</div>
+
+<script src="data.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+$("#date").value = new Date().toISOString().slice(0,10);
+(function(){
+  const D = window.TW_DATA;
+  if (D && D.terrain && D.terrain.plots){
+    const sel = $("#plot");
+    D.terrain.plots.forEach(p=>{ const o=document.createElement("option"); o.value=p.name; o.textContent=p.name; sel.appendChild(o); });
+  }
+})();
+async function refresh(){
+  try { const r = await fetch("api/reports"); const d = await r.json();
+    $("#recs").innerHTML = "已上报 <b>" + d.count + "</b> 条。" + (d.items||[]).slice(-5).map(i=>`<span class="pill">${i.date} ${i.kind}</span>`).join("");
+  } catch(e){ $("#recs").textContent = "（离线或服务不可用）"; }
+}
+$("#submit").onclick = async ()=>{
+  const body = {date:$("#date").value, plot:$("#plot").value, kind:$("#kind").value, note:$("#note").value};
+  try {
+    const r = await fetch("api/report", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const d = await r.json();
+    $("#msg").textContent = "✅ 提交成功，累计 " + d.count + " 条。";
+    refresh();
+  } catch(e){ $("#msg").textContent = "⚠️ 提交失败（需在线服务）。"; }
+};
+refresh();
+</script>
+</body>
+</html>
