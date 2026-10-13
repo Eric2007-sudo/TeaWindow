@@ -14,7 +14,8 @@ jobs:
       - name: Trigger refresh & keep-alive
         run: |
           echo "== wake up / refresh =="
-          curl -sS -m 180 -X POST "https://teawindow.onrender.com/api/refresh" || true
+          curl -sS -m 180 -X POST "https://teawindow.onrender.com/api/refresh" \
+               -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}" || true
           echo ""
           echo "== health =="
           curl -sS -m 180 "https://teawindow.onrender.com/api/health" || true
