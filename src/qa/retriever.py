@@ -20,6 +20,7 @@ _index = None
 _Z = None
 _loaded = False
 _backend = None
+_error = None
 
 
 def _pool(ids, mask):
@@ -41,7 +42,7 @@ def _embed(texts):
 
 
 def _load():
-    global _session, _tokenizer, _index, _Z, _loaded, _backend
+    global _session, _tokenizer, _index, _Z, _loaded, _backend, _error
     if _loaded:
         return
     _loaded = True
@@ -51,6 +52,8 @@ def _load():
     mp = os.path.join(d, "model.int8.onnx")
     tp = os.path.join(d, "tokenizer.json")
     if not (os.path.exists(mp) and os.path.exists(tp) and os.path.exists(INDEX_PATH)):
+        _error = f"missing files: onnx={os.path.exists(mp)} tok={os.path.exists(tp)} idx={os.path.exists(INDEX_PATH)} ({d})"
+        print("[retriever]", _error)
         return
     try:
         import onnxruntime as ort  # noqa: PLC0415
@@ -65,7 +68,13 @@ def _load():
         _backend = "bge-small-zh-int8"
         print("[retriever] 检索后端已启用:", _backend, "索引", len(_index))
     except Exception as e:  # noqa: BLE001
+        _error = repr(e)
         print("[retriever] 检索后端不可用:", e)
+
+
+def error():
+    _load()
+    return _error
 
 
 def available():
