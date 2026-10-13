@@ -173,15 +173,15 @@ def _refresh(do_fetch=True):
 
 @app.get("/api/health")
 def health():
+    retr = None
     try:
         from qa import retriever
         retr = retriever.backend()
-        retr_dbg = retriever.debug()
-    except Exception as e:  # noqa: BLE001
-        retr, retr_dbg = None, {"error": repr(e)}
+    except Exception:  # noqa: BLE001
+        retr = None
     return {"status": "ok", "data_ready": os.path.exists(DATA_JSON),
             "has_llm_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
-            "retrieval": retr, "retrieval_debug": retr_dbg}
+            "retrieval": retr}
 
 
 @app.get("/api/overview")
