@@ -72,8 +72,8 @@ TeaWindow/
 │  ├─ llm_advice.py      # DeepSeek 白话建议（带规则后备）
 │  ├─ pipeline.py · serve.py · build_export.py · make_figs.py · make_qr.py · deploy_render.py
 ├─ tests/                # pytest 单元测试
-├─ src/qa/               # 自研问答：build_corpus · train_intent_local · engine
-├─ gpu/                  # GPU 训练脚本：train_intent_bert · train_embedder · predict_intent
+├─ src/qa/               # 自研问答：build_corpus · train_intent_local · engine · nlg · build_d2t
+├─ gpu/                  # GPU 训练脚本：train_intent_bert · train_embedder · predict_intent · train_d2t · export_onnx · infer_d2t
 ├─ data/qa/              # 问答语料/知识库/意图标注
 ├─ data/ raw · processed # 原始与处理后数据
 ├─ models/               # metrics.json · calibration.json

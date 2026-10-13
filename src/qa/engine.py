@@ -264,9 +264,13 @@ def answer(question, context=None):
     elif conf < 0.8 and kw:
         intent, conf = kw, max(conf, 0.8)
     sl = _slots(question, data)
-    res = compose(intent, question, sl, data)
-    return {"engine": "teawindow-own", "intent": intent, "confidence": round(conf, 2),
-            "slots": sl, "text": res["text"], "chain": res["chains"]}
+    try:
+        from . import nlg
+    except Exception:  # noqa: BLE001
+        import nlg  # type: ignore
+    res = nlg.compose(intent, question, sl, data)
+    return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": round(conf, 2),
+            "slots": sl, "detail": bool(res.get("detail")), "text": res["text"], "chain": res["chain"]}
 
 
 if __name__ == "__main__":
