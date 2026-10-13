@@ -91,12 +91,10 @@ def advice_for(ctx):
 
 
 def generate(ctx):
-    txt = deepseek(ctx)
-    src = "deepseek-chat"
-    if not txt:
-        txt = rule_based(ctx)
-        src = "rule_fallback"
-    return {"source": src, "text": txt}
+    """P0-1：日报先由规则层生成（数值/结论确定），LLM 仅可选润色；失败回退规则。"""
+    base = rule_based(ctx)
+    rep = rephrase_keep_numbers("", base)
+    return {"source": rep["source"], "text": rep["text"], "base_text": base}
 
 
 def ctx_from_row(row):
@@ -143,12 +141,44 @@ CHAT_SYSTEM = (
 )
 
 
-def rephrase_keep_numbers(question, base_text):
-    """仅润色文字，禁止改动任何数值/日期/结论；校验失败即回退原文。返回 {source, text}。"""
+def _consistency_ok(base, out):
+    """P0-2：不只看数字，还校验结论极性、季节与允许动作一致（润色不得改变结论）。"""
     import re as _re
-    nums = _re.findall(r"\d+(?:\.\d+)?", base_text)
+    nums = _re.findall(r"\d+(?:\.\d+)?", base)
+    if not all(n in out for n in nums):
+        return False
+    if len(out) > len(base) * 1.6:
+        return False
+    # 结论极性对照（"否"组 vs "是"组）；原文说了某个极性，润色后不得翻成相反极性
+    PAIRS = [
+        (["不宜采", "不适合采", "暂不宜采", "非春采期", "不推荐采", "不用采", "不建议采"],
+         ["适合采", "可以采", "可正常采", "正常采"]),
+        (["不用防冻", "无需防冻", "无霜冻", "没有霜冻", "不需要防冻", "暂不防冻"],
+         ["要防冻", "需防冻", "建议防冻", "提前防冻", "重点防冻", "需要防冻"]),
+        (["不用遮阳", "无需遮阳", "无高温", "不用防高温", "无高温胁迫"],
+         ["要遮阳", "建议遮阳", "注意高温", "防高温", "防热害", "上遮阳网"]),
+    ]
+    for neg, pos in PAIRS:
+        neg_in = [p for p in neg if p in base]
+        pos_in = [p for p in pos if p in base]
+        if neg_in and not pos_in:            # 原文为"否"
+            if any(p in out for p in pos) and not any(p in out for p in neg):
+                return False
+        if pos_in and not neg_in:            # 原文为"是"
+            if any(p in out for p in neg) and not any(p in out for p in pos):
+                return False
+    # 季节一致性：非春采期结论不得被润色掉，或改成鼓励采摘
+    if "非春采期" in base:
+        if "非春采期" not in out and not any(k in out for k in ["养护", "越冬", "修剪"]):
+            return False
+    return True
+
+
+def rephrase_keep_numbers(question, base_text):
+    """仅润色文字，禁止改动任何数值/日期/结论极性/季节；校验失败即回退原文。返回 {source, text}。"""
     if requests and os.environ.get("DEEPSEEK_API_KEY"):
-        sys_p = ("你只做文字润色。规则：不得新增、修改或删除任何数字与日期；不得改变结论与建议动作；"
+        sys_p = ("你只做文字润色。规则：不得新增、修改或删除任何数字与日期；不得改变结论与建议动作的极性"
+                 "（'要/不要'、'适合采/不宜采'、'防冻/不防冻'等）；不得删除季节或数据时效提示；"
                  "只把句子改得更口语、通顺；输出不超过原文长度的1.2倍；直接输出润色后的整段文字。")
         try:
             r = requests.post(API_URL, timeout=60,
@@ -160,8 +190,10 @@ def rephrase_keep_numbers(question, base_text):
                                     "temperature": 0.2, "max_tokens": 300})
             r.raise_for_status()
             out = r.json()["choices"][0]["message"]["content"].strip()
-            if out and all(n in out for n in nums) and len(out) <= len(base_text) * 1.6:
+            if out and _consistency_ok(base_text, out):
                 return {"source": "deepseek-rephrase", "text": out}
+            if out:
+                print("  [rephrase] 一致性校验未通过，回退规则")
         except Exception as e:  # noqa: BLE001
             print("  [rephrase] 调用失败，回退规则:", e)
     return {"source": "rule_fallback", "text": base_text}

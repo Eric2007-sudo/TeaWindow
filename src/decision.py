@@ -18,6 +18,18 @@ PROTECT_COST = 4.0
 
 def main():
     data = json.load(open(os.path.join(WEB, "data.json"), encoding="utf-8"))
+    # 季节策略：非春采期不生成采摘决策（统一业务层约束）
+    if datetime.date.today().month not in (3, 4):
+        data["decision"] = {"season": "off", "mode": "care",
+                            "task": "非春采期：以养护为主（防冻/防旱/排涝、修剪、施肥、清沟、越冬准备）",
+                            "days": [], "best_pick_day": None}
+        data["pick_window"] = []
+        data["pick_window_note"] = "非春采期（西湖龙井 43 春采季为 3–4 月），不提供采摘窗口。"
+        blob = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        open(os.path.join(WEB, "data.json"), "w", encoding="utf-8").write(blob)
+        open(os.path.join(WEB, "data.js"), "w", encoding="utf-8").write("window.TW_DATA = " + blob + ";\n")
+        print("season=off -> 决策与采摘窗口已停用（转养护）")
+        return
     today = datetime.date.today().isoformat()
     fc = [d for d in data["days"] if d["source"] == "forecast" and d["date"] >= today][:16]
 

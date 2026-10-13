@@ -88,13 +88,18 @@ def main():
 
     recent = hist_e.tail(180)
 
-    # 采摘窗口：未来(>=今天)按适宜度排序取前 5（仅作"适宜度视角"参考；最终以决策模块统一口径为准）
+    # 采摘窗口：仅春采季(3–4月)生成；非春采期停用（统一业务层季节策略）
     import datetime as _dt
     _today = _dt.date.today()
-    fc_future = fc_e[fc_e["date"].dt.date >= _today]
-    win = fc_future.sort_values("suitability", ascending=False).head(5)
-    window = [{"date": str(r["date"])[:10], "suitability": float(r["suitability"]),
-               "risk_level": str(r["risk_level"])} for _, r in win.iterrows()]
+    season_name = "spring" if _today.month in (3, 4) else "off"
+    season_off = (season_name == "off")
+    if season_off:
+        window = []
+    else:
+        fc_future = fc_e[fc_e["date"].dt.date >= _today]
+        win = fc_future.sort_values("suitability", ascending=False).head(5)
+        window = [{"date": str(r["date"])[:10], "suitability": float(r["suitability"]),
+                   "risk_level": str(r["risk_level"])} for _, r in win.iterrows()]
 
     with open(os.path.join(PROC, "ndvi.json"), encoding="utf-8") as f:
         ndvi = json.load(f)
@@ -124,7 +129,7 @@ def main():
     days = []
     for r in recs(recent, "history") + recs(fc_e, "forecast"):
         dt = r["date"]
-        r["advice"] = nlg.day_advice(r)
+        r["advice"] = nlg.day_advice(r, season_off)
         r["advice_source"] = "teawindow-own"
         if r["source"] == "forecast" and dt in ensmap:
             s = ensmap[dt]

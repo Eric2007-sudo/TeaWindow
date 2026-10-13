@@ -14,22 +14,55 @@ SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
 sys.path.insert(0, SRC)
 
+from contextlib import asynccontextmanager  # noqa: E402
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request  # noqa: E402
 import time as _time  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 import llm_advice  # noqa: E402  (触发 .env 加载)
 
 WEB = os.path.join(ROOT, "web")
 DATA_JSON = os.path.join(WEB, "data.json")
 
-app = FastAPI(title="TeaWindow API", version="1.0",
-              description="梅家坞龙井复合气候风险与采摘窗口决策助手")
-
 _refresh_lock = threading.Lock()
 _advice_cache = {}
+
+
+def _season_of(d=None):
+    """统一季节策略：春采季 3–4 月；其余为非春采期。"""
+    d = d or datetime.date.today()
+    return "spring" if d.month in (3, 4) else "off"
+
+
+@asynccontextmanager
+async def _lifespan(app):  # noqa: ARG001
+    if not os.path.exists(DATA_JSON):
+        print("[serve] 首次启动，生成数据 ...")
+        _refresh(True)
+    yield
+
+
+app = FastAPI(title="TeaWindow API", version="1.0",
+              description="梅家坞龙井复合气候风险与采摘窗口决策助手",
+              lifespan=_lifespan)
+
+# 请求体上限（P0-4：超大 body 在网络/解析前拒绝）
+MAX_BODY = int(os.environ.get("MAX_BODY_BYTES", "65536"))
+# LLM 每日预算（P0-4：昂贵调用独立配额）
+LLM_DAILY_BUDGET = int(os.environ.get("LLM_DAILY_BUDGET", "300"))
+_llm_usage = {"date": "", "count": 0}
+
+
+def _llm_spend():
+    today = datetime.date.today().isoformat()
+    if _llm_usage["date"] != today:
+        _llm_usage["date"], _llm_usage["count"] = today, 0
+    if _llm_usage["count"] >= LLM_DAILY_BUDGET:
+        return False
+    _llm_usage["count"] += 1
+    return True
 
 
 def _load():
@@ -66,13 +99,22 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 
 def _require_admin(request):
-    tok = request.headers.get("X-Admin-Token") or request.query_params.get("token")
+    # P0-3：仅允许请求头传令牌，禁止 URL 查询参数（避免进入日志/历史）
+    tok = request.headers.get("X-Admin-Token")
     if not ADMIN_TOKEN or tok != ADMIN_TOKEN:
         raise HTTPException(403, "forbidden: admin token required")
 
 
 @app.middleware("http")
-async def _security_headers(request, call_next):
+async def _guard_and_headers(request, call_next):
+    # P0-4：请求体上限（在业务解析前拦截过大 body）
+    cl = request.headers.get("content-length")
+    if cl:
+        try:
+            if int(cl) > MAX_BODY:
+                return JSONResponse({"detail": f"request body too large (>{MAX_BODY} bytes)"}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "invalid Content-Length"}, status_code=400)
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
@@ -115,27 +157,33 @@ def summary():
     n7 = forecast[:7]
     maxrisk = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else None
     cur = _cur_day(days)
-    hist = [x for x in days if x["source"] == "history"]
+    season = (d.get("meta", {}) or {}).get("season") or _season_of()
+    # P0-1：非春采期不对外提供采摘窗口（统一季节策略）
+    pick_window = d.get("pick_window", []) if season == "spring" else []
     return {
         "updated": d["meta"]["updated"],
+        "season": season,
         "data_age_days": (datetime.date.today() - datetime.date.fromisoformat(str(cur["date"])[:10])).days if cur else None,
         "current": {"date": cur["date"], "risk_level": cur["risk_level"],
                     "risk_R": cur["risk_R"], "suitability": cur["suitability"]} if cur else None,
         "next7_max": {"date": maxrisk["date"], "risk_level": maxrisk["risk_level"],
                       "risk_R": maxrisk["risk_R"]} if maxrisk else None,
-        "pick_window": d.get("pick_window", []),
+        "pick_window": pick_window,
+        "pick_window_note": d.get("pick_window_note"),
         "metrics": d.get("metrics", {}).get("ml", {}),
     }
 
 
 @app.get("/api/days")
 def days(scope: str = "recent"):
+    if scope not in ("recent", "forecast", "history"):
+        raise HTTPException(422, "scope must be 'recent' | 'forecast' | 'history'")
     d = _load()
     if scope == "forecast":
-        return {"days": [x for x in d["days"] if x["source"] == "forecast"]}
+        return {"scope": scope, "days": [x for x in d["days"] if x["source"] == "forecast"]}
     if scope == "history":
-        return {"days": [x for x in d["days"] if x["source"] == "history"]}
-    return {"days": d["days"]}
+        return {"scope": scope, "days": [x for x in d["days"] if x["source"] == "history"]}
+    return {"scope": scope, "days": d["days"]}
 
 
 @app.get("/api/advice")
@@ -146,6 +194,9 @@ def advice(date: str):
     row = next((x for x in d["days"] if x["date"] == date), None)
     if row is None:
         raise HTTPException(404, f"未找到日期 {date}")
+    if not _llm_spend():
+        return {"source": "budget_fallback", "date": date,
+                "text": row.get("advice") or "LLM 每日预算已用尽，返回自研规则建议。"}
     ctx = llm_advice.ctx_from_row(_to_serieslike(row))
     out = llm_advice.generate(ctx)
     out["date"] = date
@@ -176,30 +227,40 @@ def _context():
     mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else None
     dec = d.get("decision") or {}
     sch = (d.get("schedule") or {}).get("schedule", [])
+    season = (d.get("meta", {}) or {}).get("season") or _season_of()
+    season_off = (season == "off")
     return {
+        "season": season,
         "current": ({"date": cur["date"], "risk_level": cur.get("risk_level"),
                      "risk_R": cur.get("risk_R"), "suitability": cur.get("suitability")} if cur else None),
         "next7_max": ({"date": mx["date"], "risk_level": mx.get("risk_level"),
                        "risk_R": mx.get("risk_R")} if mx else None),
-        "pick_window": d.get("pick_window", []),
-        "best_pick_day": dec.get("best_pick_day"),
-        "schedule": [{"date": s["date"], "plots": [p["name"] for p in s["plots"]]} for s in sch],
+        "pick_window": [] if season_off else d.get("pick_window", []),
+        "best_pick_day": None if season_off else dec.get("best_pick_day"),
+        "schedule": ([] if season_off else
+                     [{"date": s["date"], "plots": [p["name"] for p in s["plots"]]} for s in sch]),
         "metrics_auc": (d.get("metrics", {}).get("ml", {}) or {}).get("auc"),
         "value": d.get("value"),
     }
 
 
 class AskReq(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=500)
     engine: str = "own"   # own=自研引擎(默认)；llm=DeepSeek 可选增强
-    history: list = []    # 多轮上下文：[{role:"user"/"assistant", content: "..."}]
+    history: list = Field(default_factory=list)   # 多轮上下文：[{role:"user"/"assistant", content:"..."}]
 
 
 def _ask(q, engine, history=None):
     from qa import engine as qa_engine
     base = qa_engine.answer(q, _context(), history or [])
     if engine == "llm":
-        # P0-1：LLM 只润色，数值/结论以规则为准，校验失败回退规则
+        if not _llm_spend():
+            # P0-4：每日预算用尽 → 直接回退自研规则，不调用外部模型
+            out = dict(base)
+            out["source"] = "budget_fallback"
+            out["note"] = "LLM 每日预算已用尽，本次返回自研规则答案。"
+            return out
+        # P0-1：LLM 只润色，数值/结论/极性/季节以规则为准，校验失败回退规则
         rep = llm_advice.rephrase_keep_numbers(q, base["text"])
         out = dict(base)
         out["engine"] = "teawindow-own+llm"
@@ -215,21 +276,30 @@ def ask(request: Request, req: AskReq):
     if req.engine not in ("own", "llm"):
         raise HTTPException(422, "engine must be 'own' or 'llm'")
     ip = request.client.host if request.client else "global"
+    if req.engine == "llm":
+        _rate_limit("llm:" + ip, limit=int(os.environ.get("LLM_RPM", "8")))
     _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
     hist = []
     for m in (req.history or [])[-8:]:
         if isinstance(m, dict) and isinstance(m.get("content"), str):
             hist.append({"role": str(m.get("role", "user"))[:16], "content": m["content"][:500]})
-    return _ask((req.question or "").strip()[:500], req.engine, hist)
+    return _ask(req.question.strip(), req.engine, hist)
 
 
 @app.get("/api/ask")
 def ask_get(request: Request, q: str, engine: str = "own"):
     if engine not in ("own", "llm"):
         raise HTTPException(422, "engine must be 'own' or 'llm'")
+    q = (q or "").strip()
+    if not q:
+        raise HTTPException(422, "q must be a non-empty question (<=500 chars)")
+    if len(q) > 500:
+        raise HTTPException(422, "q too long (<=500 chars)")
     ip = request.client.host if request.client else "global"
+    if engine == "llm":
+        _rate_limit("llm:" + ip, limit=int(os.environ.get("LLM_RPM", "8")))
     _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
-    return _ask((q or "").strip()[:500], engine, [])
+    return _ask(q, engine, [])
 
 
 # ---- 众包物候上报（N4）----
@@ -303,8 +373,8 @@ class SensorBatch(BaseModel):
 
 
 def _require_sensor(request):
+    # P0-3：仅允许请求头传令牌（X-Sensor-Token / Authorization: Bearer），禁止 URL 查询参数
     tok = (request.headers.get("X-Sensor-Token")
-           or request.query_params.get("token")
            or request.headers.get("Authorization", "").replace("Bearer ", ""))
     valid = {t for t in (SENSOR_TOKEN, ADMIN_TOKEN) if t}
     if not valid or tok not in valid:
@@ -419,13 +489,6 @@ try:
     print("[serve] 已启用每日 06:00 定时刷新")
 except Exception as e:  # noqa: BLE001
     print("[serve] 未启用定时任务:", e)
-
-
-@app.on_event("startup")
-def _startup():
-    if not os.path.exists(DATA_JSON):
-        print("[serve] 首次启动，生成数据 ...")
-        _refresh(True)
 
 
 # 静态站点挂到最后，"/" 作为兜底（API 路由优先）

@@ -190,6 +190,13 @@ def compose(intent, q, sl, data):
     n7 = fc[:7]
     mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else cur
     chains = []
+    # P0-1：季节策略在业务层统一——非春采期不产出采摘类建议
+    season = (data.get("meta", {}) or {}).get("season") or \
+        ("spring" if datetime.date.today().month in (3, 4) else "off")
+    if season == "off" and intent in ("pick_window", "decision", "schedule"):
+        return {"text": "当前为非春采期（西湖龙井 43 春采季为 3–4 月），本工具此时以园间养护为主："
+                        "关注防霜冻/干旱/连阴雨，规划修剪、施肥、清沟与越冬管理，暂不提供采摘窗口与排班。",
+                "chains": ["季节约束: 非春采期"]}
     if intent == "greet":
         return {"text": "你好！我是梅坞采候助手，可以问：今天风险、要不要防冻/灌溉、采哪块地、保险与损失等。", "chains": ["自研问答引擎"]}
     if intent in ("risk_today", "plot"):

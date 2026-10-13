@@ -340,7 +340,7 @@ def fallback(ctx, q, detail):
             ["自研问答引擎"])
 
 
-def day_advice(d):
+def day_advice(d, season_off=False):
     """按单日结构化结果生成结论先行的建议（与适宜度/风险严格一致，用于替换 LLM 日报）。"""
     concl = []
     dsh, heat = d.get("cold_shock"), d.get("heat")
@@ -357,7 +357,9 @@ def day_advice(d):
     if wet:
         concl.append("防连阴雨/排水")
     if not concl:
-        if suit >= 40:
+        if season_off:
+            concl.append("非春采期·养护为主")
+        elif suit >= 40:
             concl.append("适合采")
         else:
             concl.append("暂不宜采")

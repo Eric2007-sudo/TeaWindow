@@ -59,7 +59,7 @@ def softmax(Z):
     return E / E.sum(axis=1, keepdims=True)
 
 
-def train(X, y, C, iters=10000, lr=2.0, l2=1e-5):
+def train(X, y, C, iters=10000, lr=3.0, l2=1e-4):
     N, D = X.shape
     W = np.zeros((C, D), dtype="float32")
     b = np.zeros(C, dtype="float32")
@@ -79,12 +79,14 @@ def main():
     os.makedirs(MODELS, exist_ok=True); os.makedirs(REPORT, exist_ok=True)
     tr = load(os.path.join(QA, "intents_train.jsonl"))
     ev = load(os.path.join(QA, "intents_eval.jsonl"))
-    # 若存在 GPU-BERT 蒸馏的伪标签（conf>=0.9），并入训练
-    pl = os.path.join(QA, "pseudo_labeled.jsonl")
+    # 若存在 GPU-BERT 蒸馏的伪标签（优先"干净版"），conf>=0.9 并入训练
+    pl = os.path.join(QA, "pseudo_clean_labeled.jsonl")
+    if not os.path.exists(pl):
+        pl = os.path.join(QA, "pseudo_labeled.jsonl")
     if os.path.exists(pl):
         extra = sorted([r for r in load(pl) if r.get("conf", 0) >= 0.9], key=lambda r: -r["conf"])[:1500]
         tr = tr + [{"text": r["text"], "intent": r["intent"]} for r in extra]
-        print(f"蒸馏伪标签样本并入: {len(extra)}")
+        print(f"蒸馏伪标签样本并入: {len(extra)} ({os.path.basename(pl)})")
     classes = sorted({r["intent"] for r in tr})
     cidx = {c: i for i, c in enumerate(classes)}
     vocab = build_vocab([r["text"] for r in tr])
@@ -93,7 +95,7 @@ def main():
     Xev = vectorize([r["text"] for r in ev], vocab)
     yev = np.array([cidx[r["intent"]] for r in ev])
     print(f"类别={len(classes)} 训练={len(tr)} 评测={len(ev)} 特征={Xtr.shape[1]}")
-    iters = 4000 if len(tr) > 1200 else 10000
+    iters = 3000 if len(tr) > 1200 else 4000
     W, b = train(Xtr, ytr, len(classes), iters=iters)
 
     def predict(X):

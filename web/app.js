@@ -129,7 +129,12 @@
   }
 
   /* ---------------- 采摘调度 ---------------- */
-  if (D.schedule && D.schedule.schedule) {
+  if (D.schedule && D.schedule.mode === "care") {
+    document.querySelector("#schedTable tbody").innerHTML =
+      '<tr><td colspan="4">非春采期：不生成采摘排班，转为园间养护。</td></tr>';
+    document.getElementById("sched-note").textContent =
+      "养护任务：" + ((D.schedule.care || []).join("、") || "防冻/防旱/排涝、修剪、施肥、越冬准备");
+  } else if (D.schedule && D.schedule.schedule) {
     document.querySelector("#schedTable tbody").innerHTML = D.schedule.schedule.map(s => `<tr>
       <td>${s.date}</td><td>${s.suitability}</td>
       <td><span class="badge b${s.risk_level}">${s.risk_level}</span></td>
@@ -141,7 +146,11 @@
   }
 
   /* ---------------- 决策建议（期望效用） ---------------- */
-  if (D.decision && D.decision.days) {
+  if (D.decision && D.decision.mode === "care") {
+    document.querySelector("#decTable tbody").innerHTML =
+      '<tr><td colspan="6">非春采期：不生成采摘决策（抢采/等待/防护），转为养护建议。</td></tr>';
+    document.getElementById("dec-note").textContent = D.decision.task || "以园间养护为主。";
+  } else if (D.decision && D.decision.days && D.decision.days.length) {
     const badge = a => `<span class="badge b${a === "抢采" ? "低" : (a === "防护" ? "中" : "高")}">${a}</span>`;
     document.querySelector("#decTable tbody").innerHTML = D.decision.days.map(d => `<tr>
       <td>${d.date}</td><td>${(d.p_hazard * 100).toFixed(0)}%</td>

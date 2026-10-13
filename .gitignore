@@ -15,3 +15,4 @@ data/qa/pseudo_labeled.jsonl.bak
 gpu_models/
 admin_token.txt
 data/points/
+data/qa/*.bak
