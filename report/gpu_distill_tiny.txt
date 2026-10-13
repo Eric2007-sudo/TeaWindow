@@ -1,0 +1,27 @@
+classes=15 labeled=1561 unlabeled=4000 eval=74
+teacher train-fit acc=1.0000  teacher eval acc=0.9189
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at ckiplab/bert-tiny-chinese and are newly initialized: ['bert.pooler.dense.bias', 'bert.pooler.dense.weight', 'classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+/home/eric/teacloud/distill_intent_tiny.py:98: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  opt.zero_grad(); loss.backward(); opt.step(); tot += float(loss); nb += 1
+epoch 1/12 loss 3.0601
+epoch 2/12 loss 1.7410
+epoch 3/12 loss 0.9312
+epoch 4/12 loss 0.4210
+epoch 5/12 loss 0.1762
+epoch 6/12 loss 0.0877
+epoch 7/12 loss 0.0553
+epoch 8/12 loss 0.0447
+epoch 9/12 loss 0.0406
+epoch 10/12 loss 0.0385
+epoch 11/12 loss 0.0355
+epoch 12/12 loss 0.0313
+STUDENT_EVAL_ACC=0.9054
+/home/eric/teacloud/distill_intent_tiny.py:138: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+  torch.onnx.export(student, args, onnx_path, dynamo=False, **kw)
+/home/eric/teacloud/envs/qa/lib/python3.10/site-packages/transformers/modeling_attn_mask_utils.py:196: TracerWarning: torch.tensor results are registered as constants in the trace. You can safely ignore this warning if you use this function to create tensors out of constant variables that would be the same every time you call this function. In any other case, this might cause the trace to be incorrect.
+  inverted_mask = torch.tensor(1.0, dtype=dtype) - expanded_mask
+WARNING:root:Please consider to run pre-processing before quantization. Refer to example: https://github.com/microsoft/onnxruntime-inference-examples/blob/main/quantization/image_classification/cpu/ReadMe.md 
+onnx fp32 44MB int8 11MB
+saved -> /home/eric/teacloud/models/qa_intent_tiny

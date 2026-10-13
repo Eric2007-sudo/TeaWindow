@@ -1,0 +1,20 @@
+/home/eric/teacloud/train_embedder.py:89: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  opt.zero_grad(); loss.backward(); opt.step(); tot += float(loss)
+epoch 1/15 loss 4.2511
+epoch 2/15 loss 4.0200
+epoch 3/15 loss 4.0148
+epoch 4/15 loss 4.0079
+epoch 5/15 loss 4.0099
+epoch 6/15 loss 4.0095
+epoch 7/15 loss 4.0085
+epoch 8/15 loss 4.0086
+epoch 9/15 loss 4.0093
+epoch 10/15 loss 4.0083
+epoch 11/15 loss 4.0072
+epoch 12/15 loss 4.0071
+epoch 13/15 loss 4.0080
+epoch 14/15 loss 4.0067
+epoch 15/15 loss 4.0078
+RETRIEVAL_ACC=0.8378
+saved -> /home/eric/teacloud/models/qa_embedder

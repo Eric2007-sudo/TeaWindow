@@ -49,23 +49,49 @@ BERT 在**同一份 74 条分层评测**上比轻量模型高 **16.2 个百分�
 - 关键修复：此前 `optimum` 导 Qwen 分词器时报 `'list' object has no attribute 'keys'`（`extra_special_tokens` 字段在新版 transformers 下需为 dict）；本轮改用 `torch.onnx.export` 并显式传 `token_type_ids`，绕开该问题。
 - 结论：ONNX fp32 与 PyTorch **完全等价**；int8 动态量化损失约 3 个百分点，可对接 `onnxruntime`（CPU 推理）。
 
-## 5. 蒸馏实验（诚实结论：未采用）
-尝试把 BERT 的伪标签蒸馏进生产 numpy 模型，两种都失败：
+## 5. 蒸馏实验（诚实结论）
+尝试把 BERT 的伪标签蒸馏进生产 numpy 模型（**失败**），但**蒸馏到小 transformer 学生模型成功**：
 
+### 5.1 伪标签蒸馏进 numpy（失败）
 | 伪标签来源 | 蒸馏后 numpy 准确率 |
 |---|---|
 | 噪声增广（含字符删改） | 50.0% |
 | 干净增广（仅前缀/后缀/同义） | 52.7% |
-
-- 现象：训练 loss 更低、评测更差 → **过拟合伪标签噪声**；小语料下蒸馏收益不稳定。
+- 现象：训练 loss 更低、评测更差 → **过拟合伪标签噪声**；小语料下线性模型蒸馏收益不稳定。
 - 处理：**弃用**（`.bak` 保留），生产 numpy 模型回到 75.7% 的未蒸馏版本。
 
-## 6. 部署取舍（不变）
-- **Render/离线**：numpy 轻量意图模型（75.7%）+ **强关键词/兜底规则**（对灾害类问题强关键词优先，实际可用性高于单看分类准确率）。
-- **GPU/边缘**：BERT（91.9%）与 int8 ONNX（89.2%）作为可选增强，机制与脚本已备（`gpu/export_intent_onnx.py`）。
-- 备注：int8 ONNX 98 MB 仍偏大，不适合免费层；若要上线，需进一步蒸馏到 tiny 模型。
+### 5.2 蒸馏到 tiny 学生（成功，可部署）
+`gpu/distill_intent_tiny.py`：教师 `qa_intent_bert2`（91.9%）→ 学生 `ckiplab/bert-tiny-chinese`，
+硬标签 CE + 教师软标签 KD（含 4000 条干净增广问句），12 epochs。
+
+| 模型 | 评测准确率 | 体积 |
+|---|---|---|
+| 教师 BERT（bert-base-chinese） | 91.9% | 390 MB fp32 / 98 MB int8 |
+| **学生 tiny（bert-tiny-chinese）** | **90.5%** | 44 MB fp32 / **11 MB int8** |
+| 学生 int8 ONNX（onnxruntime 实测） | **0.9054** | **11 MB** |
+| numpy 生产模型（对照） | 75.7% | <2 MB |
+
+- 结论：**用约 1/9 的体积几乎保住教师精度（-1.4pt）**，且 **int8 无额外精度损失**；
+  11 MB 的 int8 ONNX 具备**上 Render 免费层**的体积条件（仍需 tokenizer 与 onnxruntime，见 §6）。
+- 产物：`~/teacloud/models/qa_intent_tiny/{model.onnx,model.int8.onnx}`；校验脚本 `gpu/verify_onnx_intent.py`。
+
+## 5b. 语义嵌入（本轮重训）
+在新语料上重训 `bge-small-zh-v1.5`（15 epochs，对比学习）：
+
+| 指标 | 旧语料 | 新语料 |
+|---|---|---|
+| 近邻检索意图准确率 | 77.1% | **83.8%** |
+
+## 6. 部署取舍
+- **Render/离线（当前生产）**：numpy 轻量意图模型（75.7%）+ **强关键词/兜底规则**（对灾害类问题强关键词优先，实际可用性高于单看分类准确率）。
+- **可选增强（已具备产物）**：
+  - `qa_intent_tiny` int8 ONNX（**90.5%，11 MB**）：体积满足免费层条件，但仍需 `onnxruntime` 与 WordPiece 分词；
+  - `qa_intent_bert2`（91.9%）与 `qa_intent_onnx`（fp32 91.9% / int8 89.2%）：GPU/边缘端使用。
+- 备注：`onnxruntime` + 分词器依赖较重，是否接入生产需权衡冷启动与构建体积；如需接入，建议用 `int8 tiny`。
 
 ## 7. 产物与来源
-- 权重：`~/teacloud/models/qa_intent_bert2`、`~/teacloud/models/qa_intent_onnx/{model.onnx,model.int8.onnx}`。
-- 日志：`report/gpu_train_intent2.log`、`report/gpu_export_intent_onnx.log`、`report/gpu_intent_onnx_labels.json`。
+- 权重：`~/teacloud/models/{qa_intent_bert2,qa_intent_onnx,qa_intent_tiny,qa_embedder}`。
+- 校验：`gpu/verify_onnx_intent.py`（int8 tiny = 0.9054）。
+- 日志：`report/gpu_train_intent2.txt`、`report/gpu_export_intent_onnx.txt`、`report/gpu_distill_tiny.txt`、`report/gpu_train_embedder2.txt`、
+  `report/gpu_intent_onnx_labels.json`、`report/gpu_intent_tiny_labels.json`。
 - 本报告数字均由上述脚本在 GPU 1 上实测得到；GPU 已于训练后释放。
