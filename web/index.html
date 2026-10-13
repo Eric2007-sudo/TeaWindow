@@ -68,6 +68,7 @@
     <div class="sub" style="margin-top:8px">
       <a class="pill" href="chat.html">智能问答</a>
       <a class="pill" href="report.html">物候上报</a>
+      <a class="pill" href="sensor.html">传感器接入</a>
       <a class="pill" href="links.html">扫码分享</a>
       <a class="pill" href="demo.html">自播放演示</a>
     </div>
@@ -158,6 +159,12 @@
     <div class="panel">
       <h2>AI 模型说明与效果（对比单阈值基线）</h2>
       <div id="metrics"></div>
+    </div>
+
+    <div class="panel">
+      <h2>现场传感器（实时观测 · 每 20 秒刷新）</h2>
+      <div class="cards" id="sensorCards" style="margin:0"></div>
+      <div class="note" id="sensor-note">由茶园传感器经 <code>/api/sensor</code> 上报；此处只读展示，不含隐私。</div>
     </div>
 
     <div class="panel">

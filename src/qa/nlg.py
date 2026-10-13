@@ -42,17 +42,21 @@ def classify_ctx(data, q):
 
 def _horizon(q):
     import re
-    m = re.search(r"(\d+)\s*天", q)
+    m = re.search(r"([一二两三四五六七八九十0-9]+)\s*天", q)
     if m:
-        return int(m.group(1))
-    if "一个月" in q or "30天" in q or "1个月" in q:
-        return 30
-    if "半个月" in q:
-        return 15
-    if "两周" in q:
-        return 14
-    if "一周" in q:
-        return 7
+        t = m.group(1)
+        if t.isdigit():
+            return int(t)
+        cn = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        if t == "十":
+            return 10
+        if "十" in t:
+            a, b = t.split("十", 1)
+            return cn.get(a, 1) * 10 + cn.get(b, 0)
+        return cn.get(t)
+    for k, v in [("半个月", 15), ("两周", 14), ("一周", 7), ("一个月", 30)]:
+        if k in q:
+            return v
     return None
 
 
@@ -323,11 +327,44 @@ def day_advice(d):
     return text
 
 
+def forecast_list(ctx, q, detail):
+    fc, H = ctx["fc"], ctx["H"]
+    today = datetime.date.today().isoformat()
+    fut = [d for d in fc if d["date"] >= today]
+    sub = fut[:min(H, len(fut))]
+    if not sub:
+        return "暂无预报数据。", ["数据: Open-Meteo 16天预报"]
+
+    def dom(d):
+        r = []
+        if d.get("frost") or d.get("cold_shock"):
+            r.append("霜冻")
+        if d.get("heat"):
+            r.append("高温")
+        if (d.get("dry_run") or 0) >= 5 or (d.get("deficit") or 0) >= 45:
+            r.append("干旱")
+        if (d.get("wet_run") or 0) >= 4:
+            r.append("连阴雨")
+        return "/".join(r)
+    lines = []
+    for d in sub:
+        dd = dom(d)
+        lines.append(f"{d['date'][5:]} {d.get('risk_level')}(R={d.get('risk_R')}"
+                     + (f"，{dd}" if dd else "") + f"，适宜度{int(d.get('suitability') or 0)})")
+    worst = max(sub, key=lambda x: (x.get("risk_R") or 0))
+    out = f"未来 {len(sub)} 天逐日风险（梅家坞）：\n- " + "\n- ".join(lines)
+    out += f"\n最高风险：{worst['date']}（{worst.get('risk_level')}，R={worst.get('risk_R')}）。"
+    if detail:
+        out += " 等级口径：R<0.25 低 / 0.25–0.5 中 / 0.5–0.75 高 / ≥0.75 极高；风险类型取倒春寒/高温/干旱最大项。"
+    return out, ["数据: Open-Meteo 16天预报", "模型: GBDT复合风险"]
+
+
 HANDLERS = {
     "frost": frost, "heat": heat, "drought": drought, "rain": rain,
     "pick_window": pick_window, "schedule": schedule, "decision": decision, "plot": plot,
     "insurance": insurance, "value": value, "harvest_date": harvest_date,
     "data_source": data_source, "model": model, "greet": greet,
+    "forecast_list": forecast_list,
     "risk_today": None,  # 用下面通用
 }
 

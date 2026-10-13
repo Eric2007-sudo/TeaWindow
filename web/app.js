@@ -223,4 +223,29 @@
 
   document.getElementById("foot").textContent =
     "TeaWindow · AI4Climate 全球青年气候解决方案挑战赛 · 赛道01 梅家坞气候智慧茶园 · 本页为离线单文件 Demo，数据已内嵌。";
+/* ---------------- 实时传感器（公开只读，20s 轮询） ---------------- */
+  async function renderSensor() {
+    const box = document.getElementById("sensorCards");
+    if (!box) return;
+    try {
+      const r = await fetch("api/realtime", { cache: "no-store" });
+      const d = await r.json();
+      const st = d.stations || {};
+      const keys = Object.keys(st);
+      if (!keys.length) {
+        box.innerHTML = '<div class="note">暂无传感器上报。可通过 <a href="sensor.html">sensor.html</a> 或 POST /api/sensor 接入。</div>';
+        return;
+      }
+      box.innerHTML = keys.map(k => {
+        const x = st[k]; const parts = [];
+        if (x.temp != null) parts.push(`${x.temp}℃`);
+        if (x.rh != null) parts.push(`RH ${x.rh}%`);
+        if (x.soil_moisture != null) parts.push(`土湿 ${x.soil_moisture}`);
+        if (x.precip != null) parts.push(`雨 ${x.precip}mm`);
+        return `<div class="card"><div class="k">${k}</div><div class="v" style="font-size:18px">${parts.join(" · ") || "–"}</div><div class="s">${x.ts || ""}</div></div>`;
+      }).join("");
+      document.getElementById("sensor-note").textContent = `共 ${d.n} 条上报 · 更新于 ${d.updated}（仅数值，公开只读）`;
+    } catch (e) { box.innerHTML = '<div class="note">（离线或服务不可用）</div>'; }
+  }
+  renderSensor(); setInterval(renderSensor, 20000);
 })();

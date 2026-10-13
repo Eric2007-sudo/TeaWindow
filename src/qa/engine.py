@@ -106,6 +106,12 @@ STRONG = [
     ("抢采", "decision"),
     ("数据来源", "data_source"), ("从哪来", "data_source"), ("用什么模型", "model"), ("准确率", "model"),
     ("哪块地", "plot"), ("地块", "plot"),
+    # 逐日清单（放末尾，灾害类词优先命中）
+    ("列举", "forecast_list"), ("列出", "forecast_list"), ("逐日", "forecast_list"),
+    ("每天的", "forecast_list"), ("逐天", "forecast_list"),
+    ("未来一周", "forecast_list"), ("未来7天", "forecast_list"), ("未来七天", "forecast_list"),
+    ("未来3天", "forecast_list"), ("未来三天", "forecast_list"), ("未来5天", "forecast_list"),
+    ("未来五天", "forecast_list"), ("未来十天", "forecast_list"), ("未来几天", "forecast_list"),
 ]
 
 

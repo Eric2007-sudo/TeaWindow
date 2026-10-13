@@ -276,6 +276,133 @@ def reports(request: Request):
     return {"count": len(items), "items": items[-50:]}
 
 
+# ---- 传感器数据接入（第三方硬件上报）----
+POINTS = os.path.join(ROOT, "data", "points")
+SENSOR_LOG = os.path.join(POINTS, "sensor.jsonl")
+SENSOR_TOKEN = os.environ.get("SENSOR_TOKEN", "")
+_SENSOR_FIELDS = ("temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light")
+_SENSOR_RANGE = {"temp": (-30, 60), "rh": (0, 100), "soil_moisture": (0, 1),
+                 "soil_temp": (-30, 60), "precip": (0, 500), "wind": (0, 80), "light": (0, 200000)}
+
+
+class SensorReq(BaseModel):
+    station_id: str
+    ts: str                      # ISO8601，例如 2026-10-13T08:00:00+08:00
+    temp: float | None = None
+    rh: float | None = None
+    soil_moisture: float | None = None
+    soil_temp: float | None = None
+    precip: float | None = None
+    wind: float | None = None
+    light: float | None = None
+    note: str = ""
+
+
+class SensorBatch(BaseModel):
+    readings: list = []
+
+
+def _require_sensor(request):
+    tok = (request.headers.get("X-Sensor-Token")
+           or request.query_params.get("token")
+           or request.headers.get("Authorization", "").replace("Bearer ", ""))
+    valid = {t for t in (SENSOR_TOKEN, ADMIN_TOKEN) if t}
+    if not valid or tok not in valid:
+        raise HTTPException(403, "forbidden: sensor token required")
+
+
+def _valid_sensor(req):
+    import re as _re
+    sid = (req.station_id or "").strip()
+    if not _re.fullmatch(r"[A-Za-z0-9_\-]{1,40}", sid):
+        raise HTTPException(422, "station_id must match [A-Za-z0-9_-]{1,40}")
+    try:
+        datetime.datetime.fromisoformat(req.ts.replace("Z", "+00:00"))
+    except Exception:  # noqa: BLE001
+        raise HTTPException(422, "ts must be ISO8601")
+    rec = {"ts": req.ts[:32], "station_id": sid, "received": datetime.datetime.now().isoformat(timespec="seconds")}
+    n = 0
+    for f in _SENSOR_FIELDS:
+        v = getattr(req, f)
+        if v is None:
+            continue
+        lo, hi = _SENSOR_RANGE[f]
+        if not (lo <= v <= hi):
+            raise HTTPException(422, f"{f} out of range [{lo},{hi}]")
+        rec[f] = round(float(v), 3)
+        n += 1
+    if n == 0:
+        raise HTTPException(422, "at least one measurement required")
+    rec["note"] = (req.note or "")[:200]
+    return rec
+
+
+def _append_sensor(recs):
+    os.makedirs(POINTS, exist_ok=True)
+    with open(SENSOR_LOG, "a", encoding="utf-8") as f:
+        for r in recs:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    n = sum(1 for _ in open(SENSOR_LOG, encoding="utf-8"))
+    return n
+
+
+@app.post("/api/sensor")
+def sensor(request: Request, req: SensorReq):
+    _require_sensor(request)
+    ip = request.client.host if request.client else "global"
+    _rate_limit(ip, limit=int(os.environ.get("SENSOR_RPM", "120")))
+    n = _append_sensor([_valid_sensor(req)])
+    return {"status": "ok", "count": n}
+
+
+@app.post("/api/sensor/batch")
+def sensor_batch(request: Request, req: SensorBatch):
+    _require_sensor(request)
+    ip = request.client.host if request.client else "global"
+    _rate_limit(ip, limit=int(os.environ.get("SENSOR_RPM", "120")))
+    if not isinstance(req.readings, list) or not req.readings or len(req.readings) > 500:
+        raise HTTPException(422, "readings must be a non-empty list (<=500)")
+    recs = []
+    for r in req.readings:
+        if not isinstance(r, dict):
+            raise HTTPException(422, "each reading must be an object")
+        recs.append(_valid_sensor(SensorReq(**r)))
+    n = _append_sensor(recs)
+    return {"status": "ok", "accepted": len(recs), "count": n}
+
+
+@app.get("/api/realtime")
+def realtime():
+    """公开只读：各站最新观测（仅数值，无备注/隐私），供仪表盘实时刷新。"""
+    if not os.path.exists(SENSOR_LOG):
+        return {"updated": None, "n": 0, "stations": {}}
+    items = [json.loads(l) for l in open(SENSOR_LOG, encoding="utf-8") if l.strip()]
+    latest = {}
+    for r in items:
+        latest[r["station_id"]] = r
+    keep = ("ts", "temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light")
+    pub = {sid: {k: r.get(k) for k in keep if k in r} for sid, r in latest.items()}
+    return {"updated": datetime.datetime.now().isoformat(timespec="seconds"),
+            "n": len(items), "stations": pub}
+
+
+@app.get("/api/sensor/latest")
+def sensor_latest(request: Request, station_id: str = "", limit: int = 20):
+    _require_sensor(request)
+    if not os.path.exists(SENSOR_LOG):
+        return {"count": 0, "latest": {}, "items": []}
+    items = [json.loads(l) for l in open(SENSOR_LOG, encoding="utf-8") if l.strip()]
+    if station_id:
+        items = [r for r in items if r.get("station_id") == station_id]
+    latest = {}
+    for r in items:
+        latest[r["station_id"]] = r
+    return {"count": len(items), "stations": sorted(latest.keys()),
+            "latest": latest, "items": items[-max(1, min(limit, 200)):]}
+
+
+# ---- 物候/灾情上报（众包）已在上方 /api/report ----
+
 @app.post("/api/refresh")
 def refresh(request: Request, background: BackgroundTasks, fetch: bool = True):
     _require_admin(request)
