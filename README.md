@@ -60,6 +60,9 @@ TeaWindow/
 │  ├─ calibrate.py       # 概率校准(Platt)+bootstrap 置信区间
 │  ├─ ensemble.py        # 集合预报 → 霜冻/高温概率与温度分位
 │  ├─ backtest_events.py # 真实事件回测（事件级）
+│  ├─ phenology.py       # 物候外部真值：官方开采日 vs GDD 预测
+│  ├─ model_compare.py   # 三模型对照 + 预警提前量
+│  ├─ scheduler.py       # 采摘调度优化（产能约束下）
 │  ├─ llm_advice.py      # DeepSeek 白话建议（带规则后备）
 │  ├─ pipeline.py · serve.py · build_export.py · make_figs.py · make_qr.py · deploy_render.py
 ├─ tests/                # pytest 单元测试

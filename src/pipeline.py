@@ -47,6 +47,12 @@ def run(do_fetch=True, do_ndvi=True, do_figs=False):
     except Exception as e:  # noqa: BLE001
         print(f"[pipeline] 台站订正跳过：{e}")
     _step("build_export", build_export.main)
+    # 新颖点：采摘调度（读取已导出的 data.json，写回 schedule）
+    try:
+        import scheduler
+        _step("scheduler", scheduler.main)
+    except Exception as e:  # noqa: BLE001
+        print(f"[pipeline] 调度跳过：{e}")
     if do_figs:
         import make_figs
         _step("make_figs", make_figs.main)

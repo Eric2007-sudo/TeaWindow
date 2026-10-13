@@ -1,0 +1,126 @@
+{
+  "capacity_per_day": 2,
+  "method": "在每日产能约束下，综合采摘适宜度、延迟惩罚与地块霜冻易感，贪心分配地块到未来 7 天的最优采摘日。",
+  "priority": [
+    {
+      "name": "北坡茶园",
+      "frost_risk": "高",
+      "urgency": 1.0
+    },
+    {
+      "name": "山坡中段",
+      "frost_risk": "高",
+      "urgency": 1.0
+    },
+    {
+      "name": "高处茶园",
+      "frost_risk": "高",
+      "urgency": 0.91
+    },
+    {
+      "name": "梅家坞村口",
+      "frost_risk": "中",
+      "urgency": 0.65
+    },
+    {
+      "name": "梅坞溪谷",
+      "frost_risk": "中",
+      "urgency": 0.04
+    },
+    {
+      "name": "云栖方向",
+      "frost_risk": "中",
+      "urgency": 0.0
+    }
+  ],
+  "days": [
+    {
+      "date": "2026-10-12",
+      "risk_level": "低",
+      "suitability": 39.0
+    },
+    {
+      "date": "2026-10-13",
+      "risk_level": "中",
+      "suitability": 33.0
+    },
+    {
+      "date": "2026-10-14",
+      "risk_level": "中",
+      "suitability": 32.0
+    },
+    {
+      "date": "2026-10-15",
+      "risk_level": "低",
+      "suitability": 53.0
+    },
+    {
+      "date": "2026-10-16",
+      "risk_level": "低",
+      "suitability": 32.0
+    },
+    {
+      "date": "2026-10-17",
+      "risk_level": "低",
+      "suitability": 47.0
+    },
+    {
+      "date": "2026-10-18",
+      "risk_level": "低",
+      "suitability": 38.0
+    }
+  ],
+  "schedule": [
+    {
+      "date": "2026-10-12",
+      "risk_level": "低",
+      "suitability": 39.0,
+      "plots": [
+        {
+          "name": "云栖方向",
+          "frost_risk": "中",
+          "reason": "适宜度较优"
+        },
+        {
+          "name": "高处茶园",
+          "frost_risk": "高",
+          "reason": "优先抢采(霜冻易感)"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-13",
+      "risk_level": "中",
+      "suitability": 33.0,
+      "plots": [
+        {
+          "name": "梅坞溪谷",
+          "frost_risk": "中",
+          "reason": "适宜度较优"
+        },
+        {
+          "name": "梅家坞村口",
+          "frost_risk": "中",
+          "reason": "优先抢采(霜冻易感)"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-14",
+      "risk_level": "中",
+      "suitability": 32.0,
+      "plots": [
+        {
+          "name": "山坡中段",
+          "frost_risk": "高",
+          "reason": "优先抢采(霜冻易感)"
+        },
+        {
+          "name": "北坡茶园",
+          "frost_risk": "高",
+          "reason": "优先抢采(霜冻易感)"
+        }
+      ]
+    }
+  ]
+}

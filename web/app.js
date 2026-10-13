@@ -114,6 +114,18 @@
       D.terrain.method + " " + D.terrain.disclaimer;
   }
 
+  /* ---------------- 采摘调度 ---------------- */
+  if (D.schedule && D.schedule.schedule) {
+    document.querySelector("#schedTable tbody").innerHTML = D.schedule.schedule.map(s => `<tr>
+      <td>${s.date}</td><td>${s.suitability}</td>
+      <td><span class="badge b${s.risk_level}">${s.risk_level}</span></td>
+      <td>${s.plots.map(p => `${p.name}<span class="tag">(${p.reason})</span>`).join("、") || "–"}</td>
+    </tr>`).join("");
+    const pr = D.schedule.priority.map(p => `<span class="pill">${p.name} 易感${p.frost_risk}</span>`).join("");
+    document.getElementById("sched-note").innerHTML =
+      `${D.schedule.method} 每日产能 ${D.schedule.capacity_per_day} 个地块。<br>抢采优先级：${pr}`;
+  }
+
   /* ---------------- 预报表格 ---------------- */
   const tb = document.querySelector("#fcTable tbody");
   tb.innerHTML = fc.map(d => `<tr class="fc-row">
