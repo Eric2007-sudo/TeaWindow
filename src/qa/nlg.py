@@ -328,9 +328,19 @@ def compose(intent, q, sl, data):
         cur, fc, H = ctx["cur"], ctx["fc"], ctx["H"]
         n7 = fc[:7]
         mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else cur
+        dom = []
+        if cur.get("frost") or cur.get("cold_shock"):
+            dom.append("霜冻/倒春寒")
+        if cur.get("heat"):
+            dom.append("高温")
+        if (cur.get("dry_run") or 0) >= 5 or (cur.get("deficit") or 0) >= 45:
+            dom.append("干旱/水分")
+        if (cur.get("wet_run") or 0) >= 4:
+            dom.append("连阴雨")
+        domt = ("主要风险：" + "、".join(dom) + "。") if dom else "无明显主导风险。"
         text = _pick(["总体风险低。" if cur["risk_level"] == "低" else f"当前风险{cur['risk_level']}。"], q) + \
-               f" {cur['date']} 风险 {cur['risk_level']}（R={cur['risk_R']}），适宜度 {cur['suitability']}；" + \
-               f"未来7天最高在 {mx['date']}（{mx['risk_level']}）。"
+               f" {cur['date']} 风险 {cur['risk_level']}（R={cur['risk_R']}），适宜度 {cur['suitability']}；" + domt + \
+               f" 未来7天最高在 {mx['date']}（{mx['risk_level']}）。"
         if detail:
             text += " 依据：复合风险 = 倒春寒/高温/干旱 取最大；阈值 R≥0.5 记风险日。"
         chains = ["数据: Open-Meteo+Meteostat", "模型: GBDT复合风险"]

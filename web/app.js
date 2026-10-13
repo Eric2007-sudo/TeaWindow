@@ -35,7 +35,11 @@
     { k: "今日行动建议", v: (D.decision && D.decision.days && D.decision.days[0]) ? D.decision.days[0].recommend : "–",
       s: `最佳采摘日 ${D.decision ? (D.decision.best_pick_day || "–") : "–"}` }
   ];
-  document.getElementById("cards").innerHTML = cards.map(c =>
+  const staleBanner = ageDays > 2
+    ? `<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据时效</div>
+       <div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据日 ${cur.date}（已 ${ageDays} 天），行动建议请谨慎，以实况与官方预警为准</div></div>`
+    : "";
+  document.getElementById("cards").innerHTML = staleBanner + cards.map(c =>
     `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="s">${c.s}</div></div>`).join("");
 
   /* ---------------- 图表数据 ---------------- */
@@ -164,13 +168,13 @@
   /* ---------------- 预报表格 ---------------- */
   const tb = document.querySelector("#fcTable tbody");
   tb.innerHTML = fc.map(d => `<tr class="fc-row">
-    <td>${d.date}<div class="tag">${"日一二三四五六"[new Date(d.date).getDay()]}</div></td>
-    <td><span class="badge b${d.risk_level}">${d.risk_level}</span></td>
-    <td>${d.suitability}</td>
-    <td>${d.tmax}° / ${d.tmin}°</td>
-    <td>${d.precip} mm</td>
-    <td>${d.p_frost != null ? (100 * d.p_frost).toFixed(0) + "% / " + (100 * d.p_heat).toFixed(0) + "%" : "–"}</td>
-    <td class="adv">${d.advice || ""}<div class="tag">来源：${d.advice_source === "deepseek-chat" ? "DeepSeek" : "规则模板"}</div></td>
+    <td data-label="日期">${d.date}<div class="tag">${"日一二三四五六"[new Date(d.date).getDay()]}</div></td>
+    <td data-label="风险"><span class="badge b${d.risk_level}">${d.risk_level}</span></td>
+    <td data-label="适宜度">${d.suitability}</td>
+    <td data-label="Tmax/Tmin">${d.tmax}° / ${d.tmin}°</td>
+    <td data-label="降水">${d.precip} mm</td>
+    <td data-label="霜冻/高温概率">${d.p_frost != null ? (100 * d.p_frost).toFixed(0) + "% / " + (100 * d.p_heat).toFixed(0) + "%" : "–"}</td>
+    <td data-label="建议" class="adv">${d.advice || ""}<div class="tag">来源：${d.advice_source === "deepseek-chat" ? "DeepSeek" : "TeaWindow 自研规则"}</div></td>
   </tr>`).join("");
 
   /* ---------------- 模型指标 ---------------- */

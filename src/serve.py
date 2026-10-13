@@ -118,6 +118,7 @@ def summary():
     hist = [x for x in days if x["source"] == "history"]
     return {
         "updated": d["meta"]["updated"],
+        "data_age_days": (datetime.date.today() - datetime.date.fromisoformat(str(cur["date"])[:10])).days if cur else None,
         "current": {"date": cur["date"], "risk_level": cur["risk_level"],
                     "risk_R": cur["risk_R"], "suitability": cur["suitability"]} if cur else None,
         "next7_max": {"date": maxrisk["date"], "risk_level": maxrisk["risk_level"],
@@ -215,7 +216,11 @@ def ask(request: Request, req: AskReq):
         raise HTTPException(422, "engine must be 'own' or 'llm'")
     ip = request.client.host if request.client else "global"
     _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
-    return _ask((req.question or "").strip()[:500], req.engine, req.history)
+    hist = []
+    for m in (req.history or [])[-8:]:
+        if isinstance(m, dict) and isinstance(m.get("content"), str):
+            hist.append({"role": str(m.get("role", "user"))[:16], "content": m["content"][:500]})
+    return _ask((req.question or "").strip()[:500], req.engine, hist)
 
 
 @app.get("/api/ask")
