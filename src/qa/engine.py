@@ -7,6 +7,7 @@ A-3 自研问答引擎（纯 numpy，离线可跑）。
 import json
 import os
 import re
+import datetime
 
 import numpy as np
 
@@ -93,6 +94,41 @@ def _keyword_intent(q):
     return None
 
 
+# 强关键词（无歧义）优先于分类器
+STRONG = [
+    ("寒潮", "frost"), ("冷空气", "frost"), ("霜冻", "frost"), ("倒春寒", "frost"), ("防冻", "frost"), ("降温", "frost"),
+    ("高温", "heat"), ("遮阳", "heat"), ("热害", "heat"), ("灼伤", "heat"),
+    ("干旱", "drought"), ("灌溉", "drought"), ("浇水", "drought"), ("墒", "drought"),
+    ("连阴雨", "rain"), ("排水", "rain"), ("防涝", "rain"),
+    ("保险", "insurance"), ("保费", "insurance"), ("理赔", "insurance"), ("赔付", "insurance"),
+    ("开采期", "harvest_date"), ("开采日", "harvest_date"), ("什么时候开采", "harvest_date"), ("上市", "harvest_date"),
+    ("先采", "schedule"), ("采哪", "schedule"), ("排班", "schedule"), ("安排采", "schedule"),
+    ("抢采", "decision"),
+    ("数据来源", "data_source"), ("从哪来", "data_source"), ("用什么模型", "model"), ("准确率", "model"),
+    ("哪块地", "plot"), ("地块", "plot"),
+]
+
+
+def _strong_intent(q):
+    for k, it in STRONG:
+        if k in q:
+            return it
+    return None
+
+
+def _horizon(q):
+    if "一个月" in q or "30天" in q or "1个月" in q:
+        return 30
+    if "半个月" in q or "15天" in q:
+        return 15
+    if "两周" in q or "14天" in q:
+        return 14
+    if "一周" in q or "7天" in q:
+        return 7
+    m = re.search(r"(\d+)\s*天", q)
+    return int(m.group(1)) if m else None
+
+
 def classify(q):
     m = _load_model()
     x = _vec(q, m["vocab"])
@@ -112,6 +148,32 @@ def _slots(q, data):
 
 def _fmt(lst):
     return "；".join(lst)
+
+
+def _frost_answer(q, data):
+    fc = [d for d in data["days"] if d["source"] == "forecast"]
+    H = _horizon(q) or 7
+    sub = fc[:min(H, len(fc))]
+    pfmax = max((d.get("p_frost") or 0) for d in sub) if sub else 0
+    frost_days = [d["date"] for d in sub if d.get("frost") or (d.get("p_frost") or 0) > 0.2]
+    today = datetime.date.today()
+    months = sorted({(today + datetime.timedelta(days=k)).month for k in range(H + 1)})
+    clim = data.get("climatology", {}).get("monthly", [])
+    probs = [c["frost_day_prob"] for c in clim if c["month"] in months]
+    clim_prob = max(probs) if probs else 0
+    end = (today + datetime.timedelta(days=H)).isoformat()
+    text = f"未来 {H} 天（至 {end}）寒潮/霜冻展望：预报期霜冻概率最高 P={pfmax:.2f}，"
+    text += ("有霜冻风险日：" + "、".join(frost_days) + "。") if frost_days else "无霜冻风险日。"
+    if H > 16:
+        text += (f" 超出 16 天无逐日预报，参考历史气候：{'、'.join(str(m) for m in months)} 月"
+                 f"出现霜冻日的概率约 {clim_prob*100:.0f}%——"
+                 + ("需开始关注防冻。" if clim_prob > 0.2 else "总体偏低，可暂不重点防冻。"))
+    text += " 建议：达标芽叶优先抢采；夜晨低温可覆盖/熏烟/喷水防御。"
+    return text
+
+
+def _horizon_label(H):
+    return f"{H}天" if H else "近7天"
 
 
 def compose(intent, q, sl, data):
@@ -134,15 +196,8 @@ def compose(intent, q, sl, data):
         chains += ["数据: Open-Meteo", "模型: GBDT复合风险"]
         return {"text": risk, "chains": chains}
     if intent == "frost":
-        pf = fc[0].get("p_frost") if fc else None
-        text = f"当前无霜冻(最近日 Tmin={cur['tmin']}℃)。"
-        if any(d.get("frost") for d in n7):
-            d = next(d for d in n7 if d.get("frost"))
-            text += f" 未来7天 {d['date']} 有霜冻风险（Tmin={d['tmin']}℃）。"
-        else:
-            text += " 未来7天暂无霜冻信号。"
-        text += " 建议：达标芽叶优先抢采；夜晨低温可覆盖/熏烟/喷水防御。"
-        return {"text": text, "chains": ["数据: Open-Meteo+Meteostat", "模型: 霜冻/倒春寒指标"]}
+        return {"text": _frost_answer(q, data),
+                "chains": ["数据: Open-Meteo 16天预报 + 逐月气候概率", "模型: 霜冻/倒春寒 + 集合 P(霜冻)"]}
     if intent == "heat":
         hs = [d for d in n7 if d.get("heat") or (d.get("p_heat") or 0) > 0.2]
         text = "未来7天无明显高温胁迫。" if not hs else ("未来7天高温风险日：" + "、".join(d["date"] for d in hs) + "。")
@@ -202,8 +257,11 @@ def compose(intent, q, sl, data):
 def answer(question, context=None):
     data = _load_data()
     intent, conf = classify(question)
+    strong = _strong_intent(question)
     kw = _keyword_intent(question)
-    if conf < 0.8 and kw:           # 中低置信度用关键词兜底（关键词更可靠）
+    if strong:
+        intent, conf = strong, max(conf, 0.9)
+    elif conf < 0.8 and kw:
         intent, conf = kw, max(conf, 0.8)
     sl = _slots(question, data)
     res = compose(intent, question, sl, data)
