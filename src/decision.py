@@ -6,7 +6,11 @@
 """
 import json
 import os
+import sys
 import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import season  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
@@ -18,8 +22,8 @@ PROTECT_COST = 4.0
 
 def main():
     data = json.load(open(os.path.join(WEB, "data.json"), encoding="utf-8"))
-    # 季节策略：非春采期不生成采摘决策（统一业务层约束）
-    if datetime.date.today().month not in (3, 4):
+    # 季节策略：非春采期不生成采摘决策（统一业务层约束，Asia/Shanghai）
+    if season.is_off():
         data["decision"] = {"season": "off", "mode": "care",
                             "task": "非春采期：以养护为主（防冻/防旱/排涝、修剪、施肥、清沟、越冬准备）",
                             "days": [], "best_pick_day": None}
@@ -30,7 +34,7 @@ def main():
         open(os.path.join(WEB, "data.js"), "w", encoding="utf-8").write("window.TW_DATA = " + blob + ";\n")
         print("season=off -> 决策与采摘窗口已停用（转养护）")
         return
-    today = datetime.date.today().isoformat()
+    today = season.iso_today()
     fc = [d for d in data["days"] if d["source"] == "forecast" and d["date"] >= today][:16]
 
     def haz(d):

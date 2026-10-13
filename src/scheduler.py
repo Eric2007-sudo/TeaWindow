@@ -6,10 +6,14 @@
 """
 import json
 import os
+import sys
 import datetime
 
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import season  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROC = os.path.join(ROOT, "data", "processed")
@@ -23,8 +27,8 @@ def main():
     web = os.path.join(ROOT, "web", "data.json")
     with open(web, encoding="utf-8") as f:
         data = json.load(f)
-    # 季节策略：非春采期不生成采摘排班（转养护）
-    if datetime.date.today().month not in (3, 4):
+    # 季节策略：非春采期不生成采摘排班（转养护，Asia/Shanghai）
+    if season.is_off():
         data["schedule"] = {"season": "off", "mode": "care",
                             "care": ["防冻巡查", "防旱补水", "排涝清沟", "修剪与施肥", "越冬准备"],
                             "priority": [], "days": [], "schedule": []}
@@ -33,7 +37,7 @@ def main():
         open(os.path.join(ROOT, "web", "data.js"), "w", encoding="utf-8").write("window.TW_DATA = " + blob + ";\n")
         print("season=off -> 采摘排班已停用（转养护）")
         return
-    today = datetime.date.today().isoformat()
+    today = season.iso_today()
     fc = [d for d in data["days"] if d["source"] == "forecast" and d["date"] >= today][:7]
 
     # 归一化

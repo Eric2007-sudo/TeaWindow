@@ -15,13 +15,15 @@ ROOT = os.path.dirname(SRC)
 sys.path.insert(0, SRC)
 
 from contextlib import asynccontextmanager  # noqa: E402
+from typing import Literal  # noqa: E402
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request  # noqa: E402
 import time as _time  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
-from pydantic import BaseModel, Field, ConfigDict  # noqa: E402
+from pydantic import BaseModel, Field, ConfigDict, field_validator  # noqa: E402
 
 import llm_advice  # noqa: E402  (触发 .env 加载)
+import season  # noqa: E402  (统一季节与北京业务日)
 import store  # noqa: E402  (SQLite 持久化：上报/传感器)
 
 WEB = os.path.join(ROOT, "web")
@@ -32,9 +34,8 @@ _advice_cache = {}
 
 
 def _season_of(d=None):
-    """统一季节策略：春采季 3–4 月；其余为非春采期。"""
-    d = d or datetime.date.today()
-    return "spring" if d.month in (3, 4) else "off"
+    """统一季节策略：由 season.py 决定（Asia/Shanghai 业务日）。"""
+    return season.policy(d)["season"]
 
 
 @asynccontextmanager
@@ -102,8 +103,8 @@ def _load():
 
 
 def _cur_day(days):
-    """今天对应的一天：优先日期==今天；否则最近历史日；否则最后一天。"""
-    today = datetime.date.today().isoformat()
+    """今天对应的一天（北京时间）：优先日期==今天；否则最近历史日；否则最后一天。"""
+    today = season.iso_today()
     m = [d for d in days if d["date"] == today]
     if m:
         return m[0]
@@ -197,13 +198,13 @@ def summary():
     n7 = forecast[:7]
     maxrisk = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else None
     cur = _cur_day(days)
-    season = (d.get("meta", {}) or {}).get("season") or _season_of()
+    season_name = (d.get("meta", {}) or {}).get("season") or _season_of()
     # P0-1：非春采期不对外提供采摘窗口（统一季节策略）
-    pick_window = d.get("pick_window", []) if season == "spring" else []
+    pick_window = d.get("pick_window", []) if season_name == "spring" else []
     return {
         "updated": d["meta"]["updated"],
-        "season": season,
-        "data_age_days": (datetime.date.today() - datetime.date.fromisoformat(str(cur["date"])[:10])).days if cur else None,
+        "season": season_name,
+        "data_age_days": (season.today() - datetime.date.fromisoformat(str(cur["date"])[:10])).days if cur else None,
         "current": {"date": cur["date"], "risk_level": cur["risk_level"],
                     "risk_R": cur["risk_R"], "suitability": cur["suitability"]} if cur else None,
         "next7_max": {"date": maxrisk["date"], "risk_level": maxrisk["risk_level"],
@@ -284,10 +285,28 @@ def _context():
     }
 
 
+class HistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=1000)
+
+
 class AskReq(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     engine: str = "own"   # own=自研引擎(默认)；llm=DeepSeek 可选增强
-    history: list = Field(default_factory=list)   # 多轮上下文：[{role:"user"/"assistant", content:"..."}]
+    history: list[HistoryMessage] = Field(default_factory=list, max_length=20)
+
+    @field_validator("question", mode="before")
+    @classmethod
+    def _strip_question(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if not v:
+            raise ValueError("question must be non-empty after trimming")
+        return v
+
+
+class ErrorResp(BaseModel):
+    detail: str
 
 
 def _ask(q, engine, history=None):
@@ -311,7 +330,8 @@ def _ask(q, engine, history=None):
     return base
 
 
-@app.post("/api/ask", response_model=AskResp)
+@app.post("/api/ask", response_model=AskResp,
+          responses={422: {"model": ErrorResp}, 429: {"model": ErrorResp}})
 def ask(request: Request, req: AskReq):
     if req.engine not in ("own", "llm"):
         raise HTTPException(422, "engine must be 'own' or 'llm'")
@@ -319,10 +339,7 @@ def ask(request: Request, req: AskReq):
     if req.engine == "llm":
         _rate_limit("llm:" + ip, limit=int(os.environ.get("LLM_RPM", "8")))
     _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
-    hist = []
-    for m in (req.history or [])[-8:]:
-        if isinstance(m, dict) and isinstance(m.get("content"), str):
-            hist.append({"role": str(m.get("role", "user"))[:16], "content": m["content"][:500]})
+    hist = [{"role": m.role, "content": m.content[:500]} for m in req.history[-8:]]
     return _ask(req.question.strip(), req.engine, hist)
 
 
@@ -401,7 +418,7 @@ class SensorReq(BaseModel):
 
 
 class SensorBatch(BaseModel):
-    readings: list = []
+    readings: list["SensorReq"] = Field(default_factory=list, max_length=500)
 
 
 def _require_sensor(request):
@@ -457,13 +474,9 @@ def sensor_batch(request: Request, req: SensorBatch):
     _require_sensor(request)
     ip = request.client.host if request.client else "global"
     _rate_limit(ip, limit=int(os.environ.get("SENSOR_RPM", "120")))
-    if not isinstance(req.readings, list) or not req.readings or len(req.readings) > 500:
+    if not req.readings:
         raise HTTPException(422, "readings must be a non-empty list (<=500)")
-    recs = []
-    for r in req.readings:
-        if not isinstance(r, dict):
-            raise HTTPException(422, "each reading must be an object")
-        recs.append(_valid_sensor(SensorReq(**r)))
+    recs = [_valid_sensor(r) for r in req.readings]
     accepted, n = store.add_sensor(recs)
     return {"status": "ok", "accepted": accepted, "count": n}
 

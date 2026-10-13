@@ -9,8 +9,9 @@
   let busy = false;
 
   function nowHM() {
-    const d = new Date();
-    return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    try {
+      return new Date().toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit" });
+    } catch (e) { return ""; }
   }
 
   function add(text, cls, meta, chain) {
@@ -126,4 +127,18 @@
     if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
   });
   $("#clear").onclick = () => { log.innerHTML = ""; messages.length = 0; input.focus(); };
+
+  // 欢迎状态：当前数据状态 + 能力边界（评估：聊天初始区域不应为空）
+  (async function welcome() {
+    let s = "";
+    try {
+      const r = await fetch("api/summary", { cache: "no-store" });
+      if (r.ok) {
+        const d = await r.json();
+        s = "｜当前数据日 " + (d.current ? d.current.date : "–") + "，风险 " + (d.current ? d.current.risk_level : "–") +
+            "，季节 " + (d.season === "off" ? "非春采期（养护为主）" : "春采季");
+      }
+    } catch (e) { s = "｜（未连接到实时服务）"; }
+    add("你好，我是梅坞采候助手。我能回答：风险、霜冻/高温、干旱/灌溉、连雨、采摘窗口、地块、保险与损失、开采期、数据与模型说明；非茶园问题我会拒答。" + s + "。点下方快捷问题即可开始。", "bot", "欢迎 · 能力边界");
+  })();
 })();

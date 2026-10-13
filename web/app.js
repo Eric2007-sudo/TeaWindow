@@ -1,11 +1,14 @@
 /* 梅坞采候 TeaWindow — 仪表盘逻辑（在线读 /api/overview，失败回退内嵌 data.js） */
 (async function () {
   let D = window.TW_DATA;              // 离线内嵌数据（data.js）
+  let online = false;
   try {                                 // 在线模式：优先实时 API
     const r = await fetch("api/overview", { cache: "no-store" });
-    if (r.ok) D = await r.json();
+    if (r.ok) { D = await r.json(); online = true; }
   } catch (e) { /* 离线：忽略，使用内嵌数据 */ }
   if (!D) { alert("数据未加载：在线需 /api/overview，离线需 data.js"); return; }
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const days = D.days;
   const hist = days.filter(d => d.source === "history");
   const fc = days.filter(d => d.source === "forecast");
@@ -18,7 +21,7 @@
     `坐标 ${D.meta.lat}°N, ${D.meta.lon}°E · 更新时间 ${D.meta.updated} · 历史 ${hist.length} 天 + 预报 ${fc.length} 天`;
 
   /* ---------------- KPI 卡片 ---------------- */
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
   let cur = days.find(d => d.date === today)
          || [...days].reverse().find(d => d.date <= today)
          || hist[hist.length - 1];
@@ -46,6 +49,7 @@
       s: `最佳采摘日 ${D.decision ? (D.decision.best_pick_day || "–") : "–"}` }
   ];
   const notes = [];
+  if (!online) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e08a3c"><div class="k">数据来源</div><div class="v" style="font-size:15px;color:#e08a3c">⚠️ 离线/缓存（演示）数据，非实时；行动建议请以在线服务与官方预警为准</div></div>`);
   if (ageDays > 2) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据时效</div><div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据日 ${cur.date}（已 ${ageDays} 天），行动建议请谨慎，以实况与官方预警为准</div></div>`);
   if (offSeason) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#4aa8ff"><div class="k">季节提示</div><div class="v" style="font-size:15px;color:#cfe0ee">当前为非春采期（春采季 3–4 月）：采摘窗口/排班仅供参考，请以园间养护为主</div></div>`);
   document.getElementById("cards").innerHTML = notes.join("") + cards.map(c =>
@@ -122,8 +126,8 @@
   /* ---------------- 地块地形 ---------------- */
   if (D.terrain && D.terrain.plots) {
     document.querySelector("#plotTable tbody").innerHTML = D.terrain.plots.map(p => `<tr>
-      <td>${p.name}</td><td>${p.elev_m}</td><td>${p.slope_deg}°</td><td>${p.aspect_deg}°</td>
-      <td><span class="badge b${p.frost_risk}">${p.frost_risk}</span></td></tr>`).join("");
+      <td>${esc(p.name)}</td><td>${esc(p.elev_m)}</td><td>${esc(p.slope_deg)}°</td><td>${esc(p.aspect_deg)}°</td>
+      <td><span class="badge b${esc(p.frost_risk)}">${esc(p.frost_risk)}</span></td></tr>`).join("");
     document.getElementById("terrain-note").textContent =
       D.terrain.method + " " + D.terrain.disclaimer;
   }
@@ -136,9 +140,9 @@
       "养护任务：" + ((D.schedule.care || []).join("、") || "防冻/防旱/排涝、修剪、施肥、越冬准备");
   } else if (D.schedule && D.schedule.schedule) {
     document.querySelector("#schedTable tbody").innerHTML = D.schedule.schedule.map(s => `<tr>
-      <td>${s.date}</td><td>${s.suitability}</td>
-      <td><span class="badge b${s.risk_level}">${s.risk_level}</span></td>
-      <td>${s.plots.map(p => `${p.name}<span class="tag">(${p.reason})</span>`).join("、") || "–"}</td>
+      <td>${esc(s.date)}</td><td>${esc(s.suitability)}</td>
+      <td><span class="badge b${esc(s.risk_level)}">${esc(s.risk_level)}</span></td>
+      <td>${s.plots.map(p => `${esc(p.name)}<span class="tag">(${esc(p.reason)})</span>`).join("、") || "–"}</td>
     </tr>`).join("");
     const pr = D.schedule.priority.map(p => `<span class="pill">${p.name} 易感${p.frost_risk}</span>`).join("");
     document.getElementById("sched-note").innerHTML =
@@ -192,7 +196,7 @@
     <td data-label="Tmax/Tmin">${d.tmax}° / ${d.tmin}°</td>
     <td data-label="降水">${d.precip} mm</td>
     <td data-label="霜冻/高温概率">${d.p_frost != null ? (100 * d.p_frost).toFixed(0) + "% / " + (100 * d.p_heat).toFixed(0) + "%" : "–"}</td>
-    <td data-label="建议" class="adv">${d.advice || ""}<div class="tag">来源：${d.advice_source === "deepseek-chat" ? "DeepSeek" : "TeaWindow 自研规则"}</div></td>
+    <td data-label="建议" class="adv">${esc(d.advice || "")}<div class="tag">来源：${d.advice_source === "deepseek-chat" ? "DeepSeek" : "TeaWindow 自研规则"}</div></td>
   </tr>`).join("");
 
   /* ---------------- 模型指标 ---------------- */
@@ -251,7 +255,7 @@
         if (x.rh != null) parts.push(`RH ${x.rh}%`);
         if (x.soil_moisture != null) parts.push(`土湿 ${x.soil_moisture}`);
         if (x.precip != null) parts.push(`雨 ${x.precip}mm`);
-        return `<div class="card"><div class="k">${k}</div><div class="v" style="font-size:18px">${parts.join(" · ") || "–"}</div><div class="s">${x.ts || ""}</div></div>`;
+        return `<div class="card"><div class="k">${esc(k)}</div><div class="v" style="font-size:18px">${parts.join(" · ") || "–"}</div><div class="s">${esc(x.ts || "")}</div></div>`;
       }).join("");
       document.getElementById("sensor-note").textContent = `共 ${d.n} 条上报 · 更新于 ${d.updated}（仅数值，公开只读）`;
     } catch (e) { box.innerHTML = '<div class="note">（离线或服务不可用）</div>'; }

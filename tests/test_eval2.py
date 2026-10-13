@@ -253,3 +253,117 @@ def test_csp_no_unsafe_inline_script():
     csp = c.get("/api/health").headers.get("content-security-policy", "")
     assert "script-src 'self'" in csp
     assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+
+
+# ---------------- P0：空白输入 / history 强类型 / 输出完整性 ----------------
+@pytest.mark.parametrize("q", ["", "   ", "\t", "\n", "  \t \n "])
+def test_blank_question_422(q):
+    c = _client()
+    assert c.post("/api/ask", json={"question": q}).status_code == 422
+
+
+@pytest.mark.parametrize("hist", [
+    ["not-an-object"],
+    [{"role": "system", "content": "x"}],
+    [{"role": "user", "content": ""}],
+    [{"role": "user", "content": "x" * 1200}],
+    [{"content": "no-role"}],
+])
+def test_invalid_history_422(hist):
+    c = _client()
+    assert c.post("/api/ask", json={"question": "继续", "history": hist}).status_code == 422
+
+
+def test_valid_history_ok():
+    c = _client()
+    r = c.post("/api/ask", json={"question": "为什么", "history": [{"role": "user", "content": "今天有风险吗"}]})
+    assert r.status_code == 200
+
+
+def test_output_integrity_no_placeholders():
+    import qa.engine as e
+    qs = ["今天有风险吗", "要不要防冻", "先采哪块地", "保险多少钱一亩", "预计损失多少", "今年什么时候开采",
+          "继续", "明天有风险吗", "要不要浇水", "哪天雨最大", "今天和明天哪个风险更高"]
+    for q in qs:
+        txt = e.answer(q)["text"]
+        for bad in ("None", "NaN", "nan", "undefined", "建议-"):
+            assert bad not in txt, f"{q} -> {txt}"
+
+
+def test_bare_continue_without_history_clarifies():
+    import qa.engine as e
+    r = e.answer("继续")
+    assert "请先告诉我" in r["text"]
+
+
+# ---------------- P0：季节一致性（跨意图） ----------------
+def test_offseason_frost_no_pick():
+    import datetime
+    import qa.engine as e
+    if datetime.date.today().month in (3, 4):
+        pytest.skip("春采季")
+    for q in ["明天要不要防冻", "今天风险如何？请列出霜冻概率", "未来7天有霜冻吗"]:
+        txt = e.answer(q)["text"]
+        assert "可正常采" not in txt and "适合采" not in txt
+
+
+def test_offseason_decision_no_none():
+    import qa.engine as e
+    r = e.answer("要不要抢采")
+    assert "None" not in r["text"]
+    assert "非春采期" in r["text"] or "养护" in r["text"]
+
+
+# ---------------- P0：水量符号 / 风险口径 / 日期槽位 ----------------
+def test_drought_water_sign():
+    import qa.engine as e
+    txt = e.answer("要不要浇水")["text"]
+    assert "亏缺 -" not in txt and "水分亏缺 -" not in txt
+
+
+def test_risk_provenance_mentions_rule():
+    import qa.engine as e
+    r = e.answer("今天有风险吗")
+    joined = r["text"] + "".join(r.get("chain") or [])
+    assert ("专家规则" in joined) or ("规则值" in joined)
+
+
+def test_absolute_date_answered():
+    import datetime
+    import qa.engine as e
+    d = (datetime.date.today() + datetime.timedelta(days=5)).isoformat()
+    y, m, dd = d.split("-")
+    r = e.answer(f"{int(y)}年{int(m)}月{int(dd)}日有霜冻吗")
+    assert d in r["text"]
+    assert f"{d}（{d}）" not in r["text"]
+
+
+def test_historical_out_of_range_refused():
+    import qa.engine as e
+    r = e.answer("2001年3月1日有霜冻吗")
+    assert ("超出" in r["text"]) or ("无法" in r["text"])
+
+
+def test_rain_max_gives_date():
+    import qa.engine as e
+    r = e.answer("哪天雨最大")
+    assert r["intent"] == "rain_max"
+    assert r["text"].count("-") >= 2  # 含日期
+
+
+def test_48h_is_horizon_not_day():
+    import qa.engine as e
+    r = e.answer("未来48小时霜冻")
+    assert "2 天" in r["text"] or "未来 2" in r["text"]
+
+
+def test_openapi_typed_items():
+    c = _client()
+    spec = c.get("/openapi.json").json()
+    comp = spec.get("components", {}).get("schemas", {})
+    # history item 应为对象/引用，而非空 schema
+    ask = spec["paths"]["/api/ask"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    ref = ask.get("$ref", "").split("/")[-1]
+    props = comp.get(ref, {}).get("properties", {})
+    hist = props.get("history", {})
+    assert hist.get("items") or hist.get("$ref")

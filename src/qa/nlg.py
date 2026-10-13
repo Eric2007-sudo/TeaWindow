@@ -4,6 +4,9 @@ M1 自研 NLG：结论先行、条件分支、多变体、数值接地、简洁/
 """
 import hashlib
 import datetime
+import re
+
+import season
 
 # "详细"触发词（可扩展）
 DETAIL_TRIGGERS = ["详细", "为什么", "为什么", "依据", "展开", "展开说", "具体", "原因",
@@ -23,12 +26,32 @@ def _pick(items, q, extra=""):
 
 
 def current_day(days):
-    today = datetime.date.today().isoformat()
+    today = season.iso_today()
     m = [d for d in days if d["date"] == today]
     if m:
         return m[0]
     past = [d for d in days if d["date"] <= today]
     return past[-1] if past else days[-1]
+
+
+def _parse_abs_date(q):
+    """解析绝对日期：2026年10月20日 / 10月20日 / 2026-10-20 / 10-20（补当前年）。"""
+    for pat in (r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?",
+                r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})"):
+        m = re.search(pat, q)
+        if m:
+            try:
+                return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except ValueError:
+                return None
+    for pat in (r"(\d{1,2})\s*月\s*(\d{1,2})\s*日?", r"(?<!\d)(\d{1,2})[-/](\d{1,2})(?!\d)"):
+        m = re.search(pat, q)
+        if m:
+            try:
+                return datetime.date(season.today().year, int(m.group(1)), int(m.group(2)))
+            except ValueError:
+                return None
+    return None
 
 
 def _day_offset(q):
@@ -51,10 +74,23 @@ def _day_offset(q):
 
 
 def _focus_day(ctx, q):
+    """返回 (day, label)。支持相对日期、绝对日期、历史日期。"""
+    ad = _parse_abs_date(q)
+    if ad is not None:
+        iso = ad.isoformat()
+        for d in ctx["fc"]:
+            if d["date"] == iso:
+                return d, iso
+        for d in ctx["hist"]:
+            if d["date"] == iso:
+                return d, iso
+        return None, iso  # 超出数据范围
     off = _day_offset(q)
     if off is None:
         return None, None
-    target = (datetime.date.today() + datetime.timedelta(days=off)).isoformat()
+    if isinstance(off, float):
+        off = int(round(off))
+    target = (season.today() + datetime.timedelta(days=off)).isoformat()
     for d in ctx["fc"]:
         if d["date"] == target:
             return d, off
@@ -65,7 +101,15 @@ def _focus_day(ctx, q):
 
 
 def _day_label(off):
+    if isinstance(off, str):
+        return off
     return {0: "今天", 1: "明天", 2: "后天", 3: "大后天"}.get(off, f"{off}天后")
+
+
+def _dlab(off, date):
+    """避免绝对日期时出现“2026-10-20（2026-10-20）”重复。"""
+    lab = _day_label(off)
+    return lab if (isinstance(off, str) and off == date) else f"{lab}（{date}）"
 
 
 def classify_ctx(data, q):
@@ -79,6 +123,9 @@ def classify_ctx(data, q):
 
 def _horizon(q):
     import re
+    m = re.search(r"(\d+)\s*小时", q)
+    if m:
+        return max(1, int(round(int(m.group(1)) / 24)))
     m = re.search(r"([一二两三四五六七八九十0-9]+)\s*天", q)
     if m:
         t = m.group(1)
@@ -132,34 +179,43 @@ def _clim_risk(data, months, key):
 
 
 def _months_of(H):
-    today = datetime.date.today()
-    return sorted({(today + datetime.timedelta(days=k)).month for k in range(H + 1)})
+    t = season.today()
+    return sorted({(t + datetime.timedelta(days=k)).month for k in range(H + 1)})
 
 
 # ---------------------------------------------------------------- 各意图
 def frost(ctx, q, detail):
     d, off = _focus_day(ctx, q)
+    if off is not None and d is None and isinstance(off, str):
+        return (f"{off} 超出可用数据范围（历史 2015 至今 + 未来 16 天预报），无法判断该日霜冻。",
+                ["数据范围: 历史+16天预报"])
     if d is not None:
         need = d.get("frost") or d.get("cold_shock")
-        lab = _day_label(off)
+        lab = _dlab(off, d["date"])
         if need:
-            return (f"{lab}（{d['date']}）有霜冻/倒春寒风险（Tmin {d['tmin']}℃）。"
-                    "夜晨覆盖/熏烟/喷水，达标芽叶优先抢采。", ["数据: Open-Meteo", "模型: 霜冻/倒春寒"])
-        return (f"{lab}（{d['date']}）无霜冻风险：Tmin {d['tmin']}℃，"
-                f"霜冻概率 {d.get('p_frost', 0)}。可正常采。", ["数据: Open-Meteo + 集合", "模型: 霜冻/倒春寒"])
+            pick = "" if season.is_off() else "达标芽叶优先抢采。"
+            return (f"{lab} 有霜冻/倒春寒风险（Tmin {d['tmin']}℃）。"
+                    f"夜晨覆盖/熏烟/喷水。{pick}", ["数据: Open-Meteo", "模型: 霜冻/倒春寒"])
+        tail = (" " + season.care_hint()) if season.is_off() else " 达标芽叶可正常采。"
+        return (f"{lab} 无霜冻风险：Tmin {d['tmin']}℃，"
+                f"霜冻概率 {d.get('p_frost', 0)}。{tail}", ["数据: Open-Meteo + 集合", "模型: 霜冻/倒春寒"])
     fc, H = ctx["fc"], ctx["H"]
-    sub = fc[:min(H, len(fc))]
+    today = season.iso_today()
+    fut = [d for d in fc if d["date"] >= today]
+    sub = fut[:min(H, len(fut))]
     tmin, dmin = _min_tmin(sub)
     pf, d_pf = _max_pf(sub)
     need = (pf > 0.2) or (tmin is not None and tmin <= 2)
     if not need:
-        lead = _pick([f"不用防冻。", f"目前无需防冻。", f"这几天不用防冻。"], q)
-        base = (f"未来 {H} 天最低 Tmin {tmin}℃（{dmin}），无霜冻风险；达标芽叶可正常采。"
-                if tmin is not None else "预报期内无霜冻风险；可正常采。")
+        lead = _pick(["不用防冻。", "目前无需防冻。", "这几天不用防冻。"], q)
+        tail = (" " + season.care_hint()) if season.is_off() else "达标芽叶可正常采。"
+        base = (f"未来 {H} 天最低 Tmin {tmin}℃（{dmin}），无霜冻风险；" + tail
+                if tmin is not None else "预报期内无霜冻风险；" + tail)
         text = lead + base
     else:
-        lead = _pick([f"要防冻。", f"需重点防冻。", f"建议提前防冻。"], q)
-        text = lead + f" {d_pf} 前后有霜冻风险（P={pf:.2f}，Tmin {tmin}℃）。夜晨覆盖/熏烟/喷水，达标芽先抢采。"
+        lead = _pick(["要防冻。", "需重点防冻。", "建议提前防冻。"], q)
+        pick = "" if season.is_off() else "达标芽先抢采。"
+        text = lead + f" {d_pf} 前后有霜冻风险（P={pf:.2f}，Tmin {tmin}℃）。夜晨覆盖/熏烟/喷水。{pick}"
     if H > 16:
         months = _months_of(H)
         cp = _clim_risk(ctx["data"], months, "frost_day_prob")
@@ -173,10 +229,13 @@ def frost(ctx, q, detail):
 
 def heat(ctx, q, detail):
     d, off = _focus_day(ctx, q)
+    if off is not None and d is None and isinstance(off, str):
+        return (f"{off} 超出可用数据范围（历史 2015 至今 + 未来 16 天预报），无法判断该日高温。",
+                ["数据范围: 历史+16天预报"])
     if d is not None:
-        lab = _day_label(off)
+        lab = _dlab(off, d["date"])
         need = (d.get("tmax") or 0) >= 33
-        return (f"{lab}（{d['date']}）{'有高温风险' if need else '无高温风险'}"
+        return (f"{lab} {'有高温风险' if need else '无高温风险'}"
                 f"：Tmax {d['tmax']}℃。{'上遮阳网、傍晚浇透水。' if need else '可正常管理。'}",
                 ["数据: Open-Meteo + 集合", "模型: 高温"])
     fc, H = ctx["fc"], ctx["H"]
@@ -196,15 +255,27 @@ def heat(ctx, q, detail):
 
 def drought(ctx, q, detail):
     cur = ctx["cur"]
-    dry, deficit, soil = cur.get("dry_run", 0), cur.get("deficit", 0), cur.get("soil", 1)
-    need = (dry >= 5) or (deficit is not None and deficit >= 45) or (soil is not None and soil < 0.25)
-    if not need:
-        text = _pick(["暂不用灌溉。", "不用急着浇水。", "水分尚可。"], q) + f" 已连旱 {dry} 天、水分亏缺 {deficit}，暂无明显旱情。"
+    dry = cur.get("dry_run", 0) or 0
+    deficit = cur.get("deficit", 0) or 0
+    soil = cur.get("soil", None)
+    bal = "水量盈余" if deficit < 0 else "水分亏缺"
+    dry_need = dry >= 5
+    deficit_need = deficit >= 45
+    soil_need = (soil is not None and soil < 0.25)
+    conflict = dry_need and deficit < 0 and not (deficit_need or soil_need)
+    if not (dry_need or deficit_need or soil_need):
+        text = _pick(["暂不用灌溉。", "不用急着浇水。", "水分尚可。"], q) + \
+            f" 已连旱 {dry} 天、10日{bal} {abs(deficit):.1f}mm（土壤含水 {soil}，模式估计），暂无明显旱情。"
+    elif conflict:
+        text = ("建议先巡查/测墒，暂不直接灌溉。"
+                f" 已连续 {dry} 天少雨，但 10 日累计{bal} {abs(deficit):.1f}mm（降水多于蒸散），"
+                f"土壤含水 {soil}（Open-Meteo 模式估计，非田间实测）；请结合根层墒情、坡位与现场观察再决定。")
     else:
-        text = _pick(["建议灌溉。", "要补水。", "该浇一次水了。"], q) + f" 已连续 {dry} 天少雨、水分亏缺 {deficit}（土壤 {soil}）；早晚浇透根层、稻草覆盖保墒，优先幼龄/向阳坡。"
-    chains = ["数据: Open-Meteo", "模型: 干旱(水分亏缺+土壤湿度)"]
+        text = _pick(["建议灌溉。", "要补水。", "该浇一次水了。"], q) + \
+            f" 已连续 {dry} 天少雨、10日{bal} {abs(deficit):.1f}mm（土壤 {soil}，模式估计）；早晚浇透根层、稻草覆盖保墒，优先幼龄/向阳坡。"
+    chains = ["数据: Open-Meteo（水分平衡=ET0−降水；负值为盈余）", "模型: 干旱(水分亏缺+土壤含水量·模式估计)"]
     if detail:
-        text += " 依据：dry_run、10日水分亏缺(ET0−降水)、0–7cm 土壤含水量；连旱≥5 天或亏缺≥45 记干旱。"
+        text += " 依据：dry_run、10日水分平衡(ET0−降水)、0–7cm 土壤含水量；ET0−降水≥45mm 记亏缺。土壤水分为模式估计，非田间传感器。"
     return text, chains
 
 
@@ -224,9 +295,8 @@ def rain(ctx, q, detail):
 
 
 def _season():
-    """春采季：3–4月（西湖龙井 43 核心）；其余为非春采期。"""
-    m = datetime.date.today().month
-    return "spring" if m in (3, 4) else "off"
+    """春采季：3–4月（西湖龙井 43 核心）；其余为非春采期。统一由 season.py 决定。"""
+    return season.policy()["season"]
 
 
 def pick_window(ctx, q, detail):
@@ -263,9 +333,16 @@ def schedule(ctx, q, detail):
 
 
 def decision(ctx, q, detail):
+    if _season() == "off":
+        return ("当前为非春采期，不做抢采/等待/防护的采摘决策；" + season.care_hint(),
+                ["季节约束: 非春采期"])
     dec = ctx["data"].get("decision", {})
-    d0 = (dec.get("days") or [{}])[0]
-    rec = d0.get("recommend", "-")
+    days = dec.get("days") or []
+    if not days:
+        return ("暂无决策数据；当前如无风险可先安排养护，有霜冻/干旱风险时优先防护。",
+                ["模型: 决策论期望效用"])
+    d0 = days[0]
+    rec = d0.get("recommend") or "观望"
     text = _pick([f"建议{rec}。", f"今天的建议是：{rec}。"], q) + \
            f" 今日灾害概率 {d0.get('p_hazard')}；抢采EV {d0.get('ev_pick')} / 防护EV {d0.get('ev_protect')} / 等待EV {d0.get('ev_wait')}。"
     if detail:
@@ -321,9 +398,18 @@ def data_source(ctx, q, detail):
 
 
 def model(ctx, q, detail):
+    # 证据类追问：直接回答指标口径/误报漏报/局限，不复述宣传模板
+    if any(k in q for k in ["误报", "漏报", "准确率", "AUC", "auc", "验证", "指标", "区别", "可信"]):
+        return ("口径说明：页面展示的 R 为**专家规则风险**（由阈值规则生成）；GBDT 仅作辅助概率。"
+                "AUC 0.998 是**弱标签复现指标**（标签由相近气象特征规则生成），不等于真实灾害准确率；"
+                "测试集正样本仅 112，召回≈0.76，**约 24% 弱标签正例被漏检**。"
+                "事件回测仅 7 个正事件、无负事件与滚动预报回放，尚不能给出真实误报率/提前量。"
+                "结论：可复现规则，但真实预测精度需按完整春采季的前瞻性盲测验证。",
+                ["披露: 弱标签复现 vs 真实业务指标", "局限: 无负事件/无盲测"])
     if not detail:
         return ("本问答为自研引擎：自训意图分类 + 接地生成，答案来自本项目数据与模型；"
-                "核心为纯 numpy GBDT 复合风险（AUC 0.998），另有概率校准与集合不确定性。", ["自研模型与数据流"])
+                "核心为纯 numpy GBDT 复合风险（辅助概率），页面展示风险 R 为专家规则值；"
+                "AUC≈0.998 属**弱标签复现指标**，不代表真实灾害预测准确率。", ["自研模型与数据流"])
     from . import engine as _e
     kg = _e._load_kg()
     return "自研流程：" + "；".join(kg["model"] + kg["qa_engine"]) + "。", ["自研模型与数据流"]
@@ -335,8 +421,13 @@ def greet(ctx, q, detail):
 
 def fallback(ctx, q, detail):
     cur = ctx["cur"]
+    if _season() == "off":
+        return (f"我可以帮你看风险、防冻/灌溉、养护安排、保险与损失等。当前：{cur['date']} 风险 "
+                f"{cur['risk_level']}（适宜度 {cur.get('suitability','-')}）。" + season.care_hint(),
+                ["自研问答引擎"])
+    best = ctx["data"].get("decision", {}).get("best_pick_day") or "-"
     return (f"我可以帮你看风险、防冻/灌溉、采摘窗口、采哪块地、保险与损失等。当前：{cur['date']} 风险 "
-            f"{cur['risk_level']}，推荐采摘日 {ctx['data'].get('decision',{}).get('best_pick_day','-')}。",
+            f"{cur['risk_level']}，推荐采摘日 {best}。",
             ["自研问答引擎"])
 
 
@@ -344,7 +435,8 @@ def day_advice(d, season_off=False):
     """按单日结构化结果生成结论先行的建议（与适宜度/风险严格一致，用于替换 LLM 日报）。"""
     concl = []
     dsh, heat = d.get("cold_shock"), d.get("heat")
-    dry = (d.get("dry_run") or 0) >= 5 or (d.get("deficit") or 0) >= 45
+    deficit = d.get("deficit") or 0
+    dry = (deficit >= 45) or ((d.get("dry_run") or 0) >= 5 and deficit >= 0)
     wet = (d.get("wet_run") or 0) >= 4 or (d.get("precip") or 0) >= 15
     suit = d.get("suitability") or 0
     tmin, tmax, precip = d.get("tmin"), d.get("tmax"), d.get("precip")
@@ -380,6 +472,39 @@ def day_advice(d, season_off=False):
     text = head + " 建议：" + "；".join(acts) + "。"
     text += "（决策辅助，以官方预警与实况为准）"
     return text
+
+
+def rain_max(ctx, q, detail):
+    """‘哪天雨最大’：在预报期内按降水量排序，给出具体日期。"""
+    fc, H = ctx["fc"], ctx["H"]
+    today = season.iso_today()
+    fut = [d for d in fc if d["date"] >= today]
+    sub = fut[:H] if H else fut[:7]
+    if not sub:
+        return "暂无预报数据。", ["数据: Open-Meteo 16天预报"]
+    d = max(sub, key=lambda x: (x.get("precip") or 0))
+    text = (f"未来 {len(sub)} 天雨最大的是 {d['date']}（约 {d.get('precip')} mm，"
+            f"风险 {d.get('risk_level')}）。雨天鲜叶含水高，注意及时摊青；低洼茶园清沟排水。")
+    return text, ["数据: Open-Meteo 16天预报", "模型: 连阴雨指标"]
+
+
+def compare(ctx, q, detail):
+    """‘今天和明天哪个风险高’：直接比较两天。"""
+    today = season.iso_today()
+    tm = (season.today() + datetime.timedelta(days=1)).isoformat()
+    a = next((d for d in ctx["fc"] if d["date"] == today), None) or ctx["cur"]
+    b = next((d for d in ctx["fc"] if d["date"] == tm), None)
+    if not b:
+        return f"今天风险 {a.get('risk_level')}（R={a.get('risk_R')}）；暂无明日对比数据。", ["数据: Open-Meteo + 集合"]
+    if (a.get("risk_R") or 0) >= (b.get("risk_R") or 0):
+        hi, lo = a, b
+    else:
+        hi, lo = b, a
+    text = (f"对比：今天 R={a.get('risk_R')}（{a.get('risk_level')}） vs 明天 R={b.get('risk_R')}（{b.get('risk_level')}）；"
+            f"{hi['date']} 风险更高。可结合主导风险安排防冻/抗旱/排涝。")
+    if season.is_off():
+        text += " " + season.care_hint()
+    return text, ["数据: Open-Meteo + 集合预报", "模型: 复合风险对比"]
 
 
 def forecast_list(ctx, q, detail):
@@ -419,7 +544,7 @@ HANDLERS = {
     "pick_window": pick_window, "schedule": schedule, "decision": decision, "plot": plot,
     "insurance": insurance, "value": value, "harvest_date": harvest_date,
     "data_source": data_source, "model": model, "greet": greet,
-    "forecast_list": forecast_list,
+    "forecast_list": forecast_list, "rain_max": rain_max, "compare": compare,
     "risk_today": None,  # 用下面通用
 }
 
@@ -438,16 +563,19 @@ def compose(intent, q, sl, data):
                 dom.append("霜冻/倒春寒")
             if fd.get("heat"):
                 dom.append("高温")
-            if (fd.get("dry_run") or 0) >= 5 or (fd.get("deficit") or 0) >= 45:
+            _dfc = fd.get("deficit") or 0
+            if _dfc >= 45 or ((fd.get("dry_run") or 0) >= 5 and _dfc >= 0):
                 dom.append("干旱/水分")
             if (fd.get("wet_run") or 0) >= 4:
                 dom.append("连阴雨")
-            lab = _day_label(off)
-            text = f"{lab}（{fd['date']}）：风险 {fd['risk_level']}（R={fd['risk_R']}，适宜度 {int(fd.get('suitability') or 0)}）。" + \
+            lab = _dlab(off, fd["date"])
+            text = f"{lab}：风险 {fd['risk_level']}（R={fd['risk_R']}，适宜度 {int(fd.get('suitability') or 0)}）。" + \
                    ("主要风险：" + "、".join(dom) + "。" if dom else "无明显主导风险。")
+            if _season() == "off":
+                text += " " + season.care_hint()
             if detail:
                 text += " 依据：复合风险 = 倒春寒/高温/干旱 取最大；R≥0.5 记风险日。"
-            return {"text": text, "chain": ["数据: Open-Meteo+集合", "模型: GBDT复合风险"], "detail": detail}
+            return {"text": text, "chain": ["数据: Open-Meteo+集合", "风险: 专家规则R（展示值）；模型: GBDT概率(辅助)"], "detail": detail}
         n7 = fc[:7]
         mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else cur
         dom = []
@@ -463,9 +591,11 @@ def compose(intent, q, sl, data):
         text = _pick(["总体风险低。" if cur["risk_level"] == "低" else f"当前风险{cur['risk_level']}。"], q) + \
                f" {cur['date']} 风险 {cur['risk_level']}（R={cur['risk_R']}），适宜度 {cur['suitability']}；" + domt + \
                f" 未来7天最高在 {mx['date']}（{mx['risk_level']}）。"
+        if _season() == "off":
+            text += " " + season.care_hint()
         if detail:
-            text += " 依据：复合风险 = 倒春寒/高温/干旱 取最大；阈值 R≥0.5 记风险日。"
-        chains = ["数据: Open-Meteo+Meteostat", "模型: GBDT复合风险"]
+            text += " 依据：复合风险 = 倒春寒/高温/干旱 取最大；阈值 R≥0.5 记风险日。R 为专家规则值。"
+        chains = ["数据: Open-Meteo+Meteostat", "风险: 专家规则R（展示值）；模型: GBDT概率(辅助)"]
     else:
         text, chains = fallback(ctx, q, detail)
-    return {"text": text, "chain": chains, "detail": detail}
+    return {"text": season.clean_text(text), "chain": chains, "detail": detail}

@@ -88,10 +88,10 @@ def main():
 
     recent = hist_e.tail(180)
 
-    # 采摘窗口：仅春采季(3–4月)生成；非春采期停用（统一业务层季节策略）
-    import datetime as _dt
-    _today = _dt.date.today()
-    season_name = "spring" if _today.month in (3, 4) else "off"
+    # 采摘窗口：仅春采季(3–4月)生成；非春采期停用（统一业务层季节策略，Asia/Shanghai）
+    import season as _season
+    _today = _season.today()
+    season_name = _season.policy(_today)["season"]
     season_off = (season_name == "off")
     if season_off:
         window = []
@@ -143,7 +143,7 @@ def main():
         "meta": {
             "site": "梅家坞（西湖龙井核心产区）", "lat": 30.2139, "lon": 120.0961,
             "updated": str(pd.Timestamp.now())[:19],
-            "season": ("spring" if _dt.date.today().month in (3, 4) else "off"),
+            "season": _season.policy()["season"],
             "sources": [
                 "Open-Meteo ERA5 历史 + 预报（气象）",
                 "NASA GIBS MODIS_Terra_NDVI_8Day（遥感，颜色近似反演）",

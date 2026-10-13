@@ -11,6 +11,8 @@ import datetime
 
 import numpy as np
 
+import season
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MODELS = os.path.join(ROOT, "models")
 WEB = os.path.join(ROOT, "web")
@@ -94,16 +96,19 @@ def _keyword_intent(q):
     return None
 
 
-# 强关键词（无歧义）优先于分类器
+# 强关键词（无歧义）优先于分类器；顺序即优先级
 STRONG = [
     ("寒潮", "frost"), ("冷空气", "frost"), ("霜冻", "frost"), ("倒春寒", "frost"), ("防冻", "frost"), ("降温", "frost"),
     ("高温", "heat"), ("遮阳", "heat"), ("热害", "heat"), ("灼伤", "heat"),
     ("干旱", "drought"), ("灌溉", "drought"), ("浇水", "drought"), ("墒", "drought"),
-    ("连阴雨", "rain"), ("排水", "rain"), ("防涝", "rain"),
+    ("连阴雨", "rain"), ("排水", "rain"), ("防涝", "rain"), ("降雨", "rain"), ("雨水", "rain"),
     ("保险", "insurance"), ("保费", "insurance"), ("理赔", "insurance"), ("赔付", "insurance"),
     ("开采期", "harvest_date"), ("开采日", "harvest_date"), ("什么时候开采", "harvest_date"), ("上市", "harvest_date"),
     ("先采", "schedule"), ("采哪", "schedule"), ("排班", "schedule"), ("安排采", "schedule"),
     ("抢采", "decision"),
+    # 最大雨日 / 对比（优先于逐日清单）
+    ("雨最大", "rain_max"), ("最大雨", "rain_max"), ("哪天雨", "rain_max"), ("降雨最大", "rain_max"),
+    ("哪个风险", "compare"), ("哪个更高", "compare"), ("哪个高", "compare"), ("风险更高", "compare"),
     ("数据来源", "data_source"), ("从哪来", "data_source"), ("用什么模型", "model"), ("准确率", "model"),
     ("哪块地", "plot"), ("地块", "plot"),
     # 逐日清单（放末尾，灾害类词优先命中）
@@ -112,7 +117,17 @@ STRONG = [
     ("未来一周", "forecast_list"), ("未来7天", "forecast_list"), ("未来七天", "forecast_list"),
     ("未来3天", "forecast_list"), ("未来三天", "forecast_list"), ("未来5天", "forecast_list"),
     ("未来五天", "forecast_list"), ("未来十天", "forecast_list"), ("未来几天", "forecast_list"),
+    ("48小时", "forecast_list"), ("48 小时", "forecast_list"),
 ]
+
+
+# 否定/改口：删除被否定的关键词，避免"不要回答霜冻，我想问雨"仍命中霜冻
+_NEG_RE = re.compile(r"(?:不要|别|不再|不是|不)(?:回答|问|关心|看|问)?\s*"
+                     r"(霜冻|倒春寒|高温|干旱|灌溉|浇水|保险|采摘|排班|风险|连阴雨|降雨|雨水)")
+
+
+def _strip_negations(q):
+    return _NEG_RE.sub("", q or "")
 
 
 def _strong_intent(q):
@@ -120,6 +135,15 @@ def _strong_intent(q):
         if k in q:
             return it
     return None
+
+
+def _strong_all(q):
+    """按优先级返回命中的强意图（去重，保序），用于复合问题拆解。"""
+    out = []
+    for k, it in STRONG:
+        if k in q and it not in out:
+            out.append(it)
+    return out
 
 
 def _horizon(q):
@@ -330,20 +354,46 @@ def answer(question, context=None, history=None):
             and ("个月" in q0 or "季度" in q0 or "半年" in q0 or "一年" in q0)):
         return _reply("我们只能给出 16 天逐日预报与逐月气候概率（历史统计），"
                       "无法准确预测三个月后的逐日气温/降雨；更远的趋势请参考气候概率或官方季节预测。")
-    # 多轮上下文：识别"追问"并继承上一话题/时效
+    # 结构化上下文：上一条 user（topic 线索）与上一条 assistant（结论）
     prev = ""
     if history:
         for m in reversed(history):
             if m.get("role") == "user":
                 prev = m.get("content", "") or ""
                 break
-    follow_marks = ["呢", "那", "这个", "它", "详细", "展开", "为什么", "依据", "具体", "原因"]
-    is_follow = (len(question) <= 12) and any(t in question for t in follow_marks) and not _strong_intent(question)
-    qt = (question + " " + prev) if (is_follow and prev) else question
+    stripped = _strip_negations(question)
+    CONTINUE = {"继续", "然后", "然后呢", "接着", "接着说", "还有", "还有呢", "那呢", "继续呢", "接下来"}
+    if q0 in CONTINUE and not prev:
+        return _reply("请先告诉我想了解哪方面（如：今天风险、要不要防冻、先采哪块地），我再继续。")
 
-    intent, conf = classify(qt)
-    strong = _strong_intent(question) or _strong_intent(qt)
-    kw = _keyword_intent(qt)
+    follow_marks = ["呢", "那", "这个", "它", "详细", "展开", "为什么", "依据", "具体", "原因"]
+    is_follow = (len(question) <= 12) and any(t in question for t in follow_marks) and not _strong_intent(stripped)
+    qt = (question + " " + prev) if (is_follow and prev) else question
+    qt_s = _strip_negations(qt)
+
+    intent, conf = classify(qt_s)
+    strongs = _strong_all(stripped) or _strong_all(qt_s)
+    strong = strongs[0] if strongs else None
+    kw = _keyword_intent(qt_s)
+
+    # 复合问题：命中多个"主题"强意图 → 逐项回答（排除清单/对比这类"容器"意图）
+    topic_strongs = [s for s in strongs if s not in ("forecast_list", "rain_max", "compare")]
+    if not is_follow and len(topic_strongs) >= 2:
+        try:
+            from . import nlg as _nlg
+        except Exception:  # noqa: BLE001
+            _nlg = None
+        if _nlg is not None:
+            parts = []
+            for it in topic_strongs[:3]:
+                rr = _nlg.compose(it, qt, _slots(qt, data), data)
+                parts.append(rr["text"])
+            return {"engine": "teawindow-own", "mode": "rules", "intent": "+".join(topic_strongs[:3]),
+                    "confidence": 0.9, "backend": intent_backend(), "retrieval": retrieval_backend(),
+                    "slots": {}, "detail": False, "follow_up": False,
+                    "text": _nlg.season.clean_text("；".join(parts)),
+                    "chain": ["复合问题拆解: " + "+".join(topic_strongs[:3])]}
+
     if strong:
         intent, conf = strong, max(conf, 0.9)
     elif conf < 0.8 and kw:
