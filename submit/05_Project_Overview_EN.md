@@ -51,6 +51,7 @@ Open-Meteo weather (history+forecast)     NASA GIBS / Sentinel-2
 ## 6. Deliverables
 - **Live service**: https://teawindow.onrender.com (FastAPI, daily 06:00 auto-refresh)
 - **Static dashboard (offline-capable)**: https://eric2007-sudo.github.io/TeaWindow/
+- **Self-built QA engine** (not an LLM wrapper): intent model trained on our corpus (≈80%) + grounded answers with a provenance chain; GPU-trained BERT intent (≈77%) and BGE embedder (≈77%).
 - Offline single-page dashboard (`web/index.html`) — double-click to run.
 - Open-source code: https://github.com/Eric2007-sudo/TeaWindow · AI analysis report (`report/analysis.md`) and figures.
 
