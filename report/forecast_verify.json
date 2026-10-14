@@ -1,0 +1,65 @@
+{
+  "site": "梅家坞",
+  "lat": 30.2139,
+  "lon": 120.0961,
+  "window": [
+    "2026-08-15",
+    "2026-10-13"
+  ],
+  "truth": "Open-Meteo Archive (ERA5)",
+  "forecast": "Open-Meteo Previous Runs",
+  "generated": "2026-10-14T09:55:43+08:00",
+  "leads": [
+    {
+      "lead": 1,
+      "n": 60,
+      "tmin_mae": 0.49,
+      "tmin_bias": -0.11,
+      "tmax_mae": 0.62,
+      "tmax_bias": -0.24,
+      "precip_mae": 2.89,
+      "frost_tp": 0,
+      "frost_fp": 0,
+      "frost_fn": 0,
+      "frost_tn": 60,
+      "pod": null,
+      "far": null,
+      "csi": null,
+      "acc": 1.0
+    },
+    {
+      "lead": 3,
+      "n": 60,
+      "tmin_mae": 0.67,
+      "tmin_bias": -0.19,
+      "tmax_mae": 1.08,
+      "tmax_bias": -0.36,
+      "precip_mae": 5.22,
+      "frost_tp": 0,
+      "frost_fp": 0,
+      "frost_fn": 0,
+      "frost_tn": 60,
+      "pod": null,
+      "far": null,
+      "csi": null,
+      "acc": 1.0
+    },
+    {
+      "lead": 7,
+      "n": 60,
+      "tmin_mae": 0.91,
+      "tmin_bias": 0.28,
+      "tmax_mae": 1.5,
+      "tmax_bias": -0.39,
+      "precip_mae": 4.6,
+      "frost_tp": 0,
+      "frost_fp": 0,
+      "frost_fn": 0,
+      "frost_tn": 60,
+      "pod": null,
+      "far": null,
+      "csi": null,
+      "acc": 1.0
+    }
+  ]
+}

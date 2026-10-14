@@ -433,3 +433,60 @@ def test_compound_three_topics():
     r = e.answer("今天风险多少、数据哪来的、我该做什么？")
     assert "+" in r["intent"]
     assert ("风险" in r["text"]) and ("数据" in r["text"] or "来源" in r["text"])
+
+
+# ---------------- 数据治理 / 设备凭证 / 田间结果 / 监控 接口 ----------------
+def test_data_versions_endpoint():
+    c = _client()
+    r = c.get("/api/data/versions?limit=3")
+    assert r.status_code == 200 and "versions" in r.json()
+
+
+def test_forecast_verify_endpoint():
+    c = _client()
+    r = c.get("/api/forecast/verify")
+    assert r.status_code == 200
+    j = r.json()
+    assert j.get("status") == "pending" or "leads" in j
+
+
+def test_device_register_verify_revoke(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    r = c.post("/api/device/register?device_id=DEV-1", headers={"X-Admin-Token": "adm"})
+    assert r.status_code == 200
+    tok = r.json()["token"]
+    # 设备令牌可用于传感器上报
+    ok = c.post("/api/sensor", json={"station_id": "DEVTEST", "ts": "2026-10-14T09:00:00+08:00", "temp": 15.0},
+                headers={"X-Sensor-Token": tok})
+    assert ok.status_code == 200
+    # 撤销后令牌失效
+    c.post("/api/device/revoke?device_id=DEV-1", headers={"X-Admin-Token": "adm"})
+    bad = c.post("/api/sensor", json={"station_id": "DEVTEST2", "ts": "2026-10-14T09:05:00+08:00", "temp": 15.0},
+                 headers={"X-Sensor-Token": tok})
+    assert bad.status_code == 403
+
+
+def test_outcome_and_pilot(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "SENSOR_TOKEN", "st")
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    r = c.post("/api/outcome", json={"date": "2026-10-20", "plot": "北坡茶园", "kind": "霜冻受灾",
+                                     "area_mu": 0.5, "damage_level": "轻"},
+               headers={"X-Sensor-Token": "st"})
+    assert r.status_code == 200
+    assert c.get("/api/outcomes", headers={"X-Admin-Token": "adm"}).status_code == 200
+    pj = c.get("/api/pilot/evaluate", headers={"X-Admin-Token": "adm"}).json()
+    assert pj["status"] in ("pending", "ready") and pj["outcomes"] >= 1
+
+
+def test_metrics_and_updates_and_phenology(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    assert c.get("/api/metrics", headers={"X-Admin-Token": "adm"}).status_code == 200
+    u = c.get("/api/updates")
+    assert u.status_code == 200 and "server_time" in u.json()
+    assert c.get("/api/phenology/validation").status_code == 200

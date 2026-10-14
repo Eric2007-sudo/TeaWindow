@@ -238,6 +238,24 @@
 
   document.getElementById("foot").textContent =
     "TeaWindow · AI4Climate 全球青年气候解决方案挑战赛 · 赛道01 梅家坞气候智慧茶园 · 本页为离线单文件 Demo，数据已内嵌。";
+
+  /* ---------------- 数据版本 / 实时更新（公开只读） ---------------- */
+  async function renderVersion() {
+    try {
+      const r = await fetch("api/data/versions?limit=1", { cache: "no-store" });
+      if (!r.ok) return;
+      const v = (await r.json()).versions?.[0];
+      if (!v) return;
+      const el = document.createElement("div");
+      el.className = "note";
+      el.style.marginTop = "8px";
+      el.textContent = "数据版本 v" + v.id + " · 抓取 " + (v.fetched_at || v.ts || "-") +
+        " · 源 " + (v.source || "-") + " · 快照hash " + String(v.raw_sha256 || "").slice(0, 12) +
+        " · 构建 " + (v.build || "-");
+      document.getElementById("sources").appendChild(el);
+    } catch (e) { /* ignore */ }
+  }
+  renderVersion();
 /* ---------------- 实时传感器（公开只读，20s 轮询） ---------------- */
   async function renderSensor() {
     const box = document.getElementById("sensorCards");

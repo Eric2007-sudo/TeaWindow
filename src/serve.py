@@ -152,6 +152,7 @@ def _require_admin(request):
 
 @app.middleware("http")
 async def _guard_and_headers(request, call_next):
+    _t0 = _time.time()
     # P0-4：请求体上限（在业务解析前拦截过大 body）
     cl = request.headers.get("content-length")
     if cl:
@@ -161,6 +162,17 @@ async def _guard_and_headers(request, call_next):
         except ValueError:
             return JSONResponse({"detail": "invalid Content-Length"}, status_code=400)
     resp = await call_next(request)
+    try:
+        dt = (_time.time() - _t0) * 1000.0
+        _METRICS["total"] += 1
+        _METRICS["latency_ms_sum"] += dt
+        _METRICS["latency_max_ms"] = max(_METRICS["latency_max_ms"], dt)
+        p = request.url.path
+        _METRICS["by_path"][p] = _METRICS["by_path"].get(p, 0) + 1
+        if resp.status_code >= 500:
+            _METRICS["errors"] += 1
+    except Exception:  # noqa: BLE001
+        pass
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
@@ -178,9 +190,32 @@ def _refresh(do_fetch=True):
         import pipeline
         pipeline.run(do_fetch=do_fetch, do_ndvi=do_fetch, do_figs=False, do_reports=False)
         _advice_cache.clear()
+        _save_snapshot()
         return {"status": "ok"}
     finally:
         _refresh_lock.release()
+
+
+def _save_snapshot():
+    """把当前预报按"版本"入库（含参数/构建/hash），用于数据血缘与长期核对。"""
+    try:
+        import hashlib
+        d = _load()
+        days = [{"date": x["date"], "tmin": x.get("tmin"), "tmax": x.get("tmax"), "precip": x.get("precip"),
+                 "p_frost": x.get("p_frost"), "p_heat": x.get("p_heat"),
+                 "risk_R": x.get("risk_R"), "risk_level": x.get("risk_level")}
+                for x in d["days"] if x["source"] == "forecast"]
+        raw = json.dumps(days, ensure_ascii=False, sort_keys=True)
+        meta = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
+                "source": "Open-Meteo (ERA5 + forecast)", "model": "teawindow-pipeline",
+                "gen_time": d.get("meta", {}).get("updated"),
+                "fetched_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "lat": d.get("meta", {}).get("lat"), "lon": d.get("meta", {}).get("lon"),
+                "raw_sha256": hashlib.sha256(raw.encode()).hexdigest()[:16],
+                "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12]}
+        store.save_snapshot(meta, days)
+    except Exception as e:  # noqa: BLE001
+        print("[serve] snapshot skip:", e)
 
 
 @app.get("/api/health")
@@ -321,6 +356,21 @@ class ErrorResp(BaseModel):
     detail: str
 
 
+class OutcomeReq(BaseModel):
+    date: str
+    plot: str = ""
+    kind: str = ""            # 采摘 / 霜冻受灾 / 高温灼伤 / 连阴雨 / 产量 / 品质 / 其他
+    area_mu: float | None = None
+    damage_level: str = ""    # 无 / 轻 / 中 / 重
+    yield_kg: float | None = None
+    quality: str = ""
+    note: str = ""
+
+
+# 运行指标（进程内，用于监控/告警）
+_METRICS = {"total": 0, "errors": 0, "by_path": {}, "latency_ms_sum": 0.0, "latency_max_ms": 0.0}
+
+
 def _ask(q, engine, history=None):
     from qa import engine as qa_engine
     try:
@@ -443,12 +493,13 @@ class SensorBatch(BaseModel):
 
 
 def _require_sensor(request):
-    # P0-3：仅允许请求头传令牌（X-Sensor-Token / Authorization: Bearer），禁止 URL 查询参数
+    # P0-3：仅允许请求头传令牌（X-Sensor-Token / Authorization: Bearer）；设备级令牌按哈希校验
     tok = (request.headers.get("X-Sensor-Token")
            or request.headers.get("Authorization", "").replace("Bearer ", ""))
     valid = {t for t in (SENSOR_TOKEN, ADMIN_TOKEN) if t}
-    if not valid or tok not in valid:
-        raise HTTPException(403, "forbidden: sensor token required")
+    if (tok and tok in valid) or (tok and store.verify_device(tok)):
+        return
+    raise HTTPException(403, "forbidden: sensor token required")
 
 
 def _valid_sensor(req):
@@ -543,6 +594,135 @@ try:
     print("[serve] 已启用每日 06:00 定时刷新")
 except Exception as e:  # noqa: BLE001
     print("[serve] 未启用定时任务:", e)
+
+
+# ---- 数据版本 / 预报快照 / 数据血缘（供第三方与审计） ----
+VERIFY_JSON = os.path.join(ROOT, "report", "forecast_verify.json")
+
+
+@app.get("/api/data/versions")
+def data_versions(limit: int = 10):
+    return {"count": store.version_count(), "versions": store.list_versions(limit)}
+
+
+@app.post("/api/data/snapshot")
+def data_snapshot(request: Request):
+    _require_admin(request)
+    _save_snapshot()
+    return {"status": "ok", "count": store.version_count()}
+
+
+@app.get("/api/forecast/verify")
+def forecast_verify():
+    """提前期真实误差（权威在线归档 Previous Runs vs ERA5）。"""
+    if not os.path.exists(VERIFY_JSON):
+        return {"status": "pending", "note": "调用 POST /api/forecast/verify/refresh 生成"}
+    return JSONResponse(json.load(open(VERIFY_JSON, encoding="utf-8")))
+
+
+@app.post("/api/forecast/verify/refresh")
+def forecast_verify_refresh(request: Request, background: BackgroundTasks, days: int = 60):
+    _require_admin(request)
+
+    def _run():
+        try:
+            import forecast_verify as fv
+            sys.argv = ["forecast_verify", "--days", str(days)]
+            fv.main()
+        except Exception as e:  # noqa: BLE001
+            print("[verify] refresh failed:", e)
+
+    background.add_task(_run)
+    return {"status": "scheduled", "days": days}
+
+
+# ---- 设备级凭证 + 审计（共享静态令牌的进阶方案） ----
+@app.post("/api/device/register")
+def device_register(request: Request, device_id: str):
+    _require_admin(request)
+    import secrets
+    tok = secrets.token_urlsafe(24)
+    store.register_device(device_id, tok)
+    return {"device_id": device_id, "token": tok, "note": "请安全保存；服务端仅存哈希，可 revoke"}
+
+
+@app.post("/api/device/revoke")
+def device_revoke(request: Request, device_id: str):
+    _require_admin(request)
+    store.revoke_device(device_id)
+    return {"status": "revoked", "device_id": device_id}
+
+
+@app.get("/api/devices")
+def devices(request: Request):
+    _require_admin(request)
+    return {"active": store.device_count(), "audit": store.list_audit(50)}
+
+
+# ---- 田间结果（前瞻性盲测真值）+ 盲测评估 ----
+@app.post("/api/outcome")
+def outcome(request: Request, req: OutcomeReq):
+    _require_sensor(request)   # 设备令牌或传感器令牌
+    import datetime as _dt
+    try:
+        _dt.date.fromisoformat(req.date)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(422, "date must be YYYY-MM-DD")
+    if req.kind not in store.OUTCOME_KINDS:
+        raise HTTPException(422, f"kind must be one of {sorted(store.OUTCOME_KINDS)}")
+    n = store.add_outcome({"ts": _dt.datetime.now().isoformat(timespec="seconds"), "date": req.date[:10],
+                           "plot": (req.plot or "")[:40], "kind": req.kind, "area_mu": req.area_mu,
+                           "damage_level": (req.damage_level or "")[:16], "yield_kg": req.yield_kg,
+                           "quality": (req.quality or "")[:40], "note": (req.note or "")[:200]})
+    return {"status": "ok", "count": n}
+
+
+@app.get("/api/outcomes")
+def outcomes(request: Request, limit: int = 100):
+    _require_admin(request)
+    return {"count": store.outcome_count(), "items": store.list_outcomes(limit)}
+
+
+@app.get("/api/pilot/evaluate")
+def pilot_evaluate(request: Request):
+    """前瞻性盲测评估：需"冻结预测快照"与"田间结果"配对后计算 precision/recall/漏报/误报/提前量。"""
+    _require_admin(request)
+    n_v, n_o = store.version_count(), store.outcome_count()
+    ready = n_v > 0 and n_o > 0
+    return {"status": "ready" if ready else "pending", "versions": n_v, "outcomes": n_o,
+            "note": "接口与存储已就绪；接入田间结果后自动按事件级计算指标（当前按需返回 pending）。"}
+
+
+# ---- 运行指标 / 告警 / 实时更新 ----
+@app.get("/api/metrics")
+def metrics(request: Request):
+    _require_admin(request)
+    avg = (_METRICS["latency_ms_sum"] / _METRICS["total"]) if _METRICS["total"] else 0
+    return {"requests": _METRICS["total"], "errors_5xx": _METRICS["errors"],
+            "latency_avg_ms": round(avg, 1), "latency_max_ms": round(_METRICS["latency_max_ms"], 1),
+            "by_path": _METRICS["by_path"], "llm_usage": _llm_usage, "llm_daily_budget": LLM_DAILY_BUDGET,
+            "sensor_count": store.sensor_count(), "device_active": store.device_count(),
+            "versions": store.version_count(), "outcomes": store.outcome_count()}
+
+
+@app.get("/api/updates")
+def updates(since: str = ""):
+    """轻量实时：服务器时间 + 各来源计数 + 各站最新，用于前端增量刷新。"""
+    latest = store.sensor_latest()
+    keep = ("ts", "temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
+    pub = {sid: {k: r.get(k) for k in keep if r.get(k) is not None} for sid, r in latest.items()}
+    return {"server_time": datetime.datetime.now().isoformat(timespec="seconds"),
+            "sensor_count": store.sensor_count(), "outcome_count": store.outcome_count(),
+            "version_count": store.version_count(), "stations": pub,
+            "latest_version": (store.list_versions(1) or [None])[0]}
+
+
+@app.get("/api/phenology/validation")
+def phenology_validation():
+    p = os.path.join(ROOT, "report", "phenology_validation.md")
+    if not os.path.exists(p):
+        return {"status": "pending"}
+    return {"status": "ready", "report": open(p, encoding="utf-8").read()}
 
 
 # 静态站点挂到最后，"/" 作为兜底（API 路由优先）

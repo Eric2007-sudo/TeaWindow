@@ -29,6 +29,22 @@ def _db():
         _conn.execute(f"""CREATE TABLE IF NOT EXISTS sensor(
             station_id TEXT NOT NULL, ts TEXT NOT NULL, received TEXT, note TEXT, {cols},
             PRIMARY KEY(station_id, ts))""")
+        # 数据版本 / 预报快照（用于提前期误差评估与数据血缘）
+        _conn.execute("""CREATE TABLE IF NOT EXISTS data_versions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, source TEXT, model TEXT, gen_time TEXT,
+            fetched_at TEXT, lat REAL, lon REAL, raw_sha256 TEXT, n_days INTEGER, build TEXT, note TEXT)""")
+        _conn.execute("""CREATE TABLE IF NOT EXISTS forecast_days(
+            version_id INTEGER, date TEXT, tmin REAL, tmax REAL, precip REAL, p_frost REAL, p_heat REAL,
+            risk_R REAL, risk_level TEXT, PRIMARY KEY(version_id, date))""")
+        # 设备级凭证（哈希存储）+ 审计
+        _conn.execute("""CREATE TABLE IF NOT EXISTS devices(
+            device_id TEXT PRIMARY KEY, token_hash TEXT, created TEXT, revoked INTEGER DEFAULT 0, last_seen TEXT)""")
+        _conn.execute("""CREATE TABLE IF NOT EXISTS audit(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, detail TEXT)""")
+        # 田间结果（前瞻性盲测真值）
+        _conn.execute("""CREATE TABLE IF NOT EXISTS outcomes(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, date TEXT, plot TEXT, kind TEXT,
+            area_mu REAL, damage_level TEXT, yield_kg REAL, quality TEXT, note TEXT)""")
         _conn.commit()
     return _conn
 
@@ -96,6 +112,147 @@ def sensor_items(station_id="", limit=200):
             rows = c.execute("SELECT * FROM sensor ORDER BY received DESC LIMIT ?", (max(1, min(limit, 500)),)).fetchall()
         col = [d[0] for d in c.execute("SELECT * FROM sensor LIMIT 1").description] if rows else []
     return [dict(zip(col, r)) for r in rows]
+
+
+# ---------------- 数据版本 / 预报快照（用于提前期误差与血缘） ----------------
+def save_snapshot(meta, days):
+    """meta: {ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,build,note}; days: [{date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level}]"""
+    with _LOCK:
+        c = _db()
+        cur = c.execute("""INSERT INTO data_versions(ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,n_days,build,note)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        (meta.get("ts"), meta.get("source"), meta.get("model"), meta.get("gen_time"),
+                         meta.get("fetched_at"), meta.get("lat"), meta.get("lon"), meta.get("raw_sha256"),
+                         len(days), meta.get("build"), meta.get("note")))
+        vid = cur.lastrowid
+        for d in days:
+            c.execute("""INSERT OR REPLACE INTO forecast_days(version_id,date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level)
+                         VALUES(?,?,?,?,?,?,?,?,?)""",
+                      (vid, d.get("date"), d.get("tmin"), d.get("tmax"), d.get("precip"),
+                       d.get("p_frost"), d.get("p_heat"), d.get("risk_R"), d.get("risk_level")))
+        c.commit()
+    return vid
+
+
+def list_versions(limit=20):
+    with _LOCK:
+        c = _db()
+        rows = c.execute("""SELECT id,ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,n_days,build
+                            FROM data_versions ORDER BY id DESC LIMIT ?""", (max(1, min(limit, 200)),)).fetchall()
+    keys = ("id", "ts", "source", "model", "gen_time", "fetched_at", "lat", "lon", "raw_sha256", "n_days", "build")
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def version_days(version_id):
+    with _LOCK:
+        c = _db()
+        rows = c.execute("SELECT date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level FROM forecast_days WHERE version_id=?",
+                         (version_id,)).fetchall()
+    keys = ("date", "tmin", "tmax", "precip", "p_frost", "p_heat", "risk_R", "risk_level")
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def version_count():
+    with _LOCK:
+        return _db().execute("SELECT COUNT(*) FROM data_versions").fetchone()[0]
+
+
+# ---------------- 设备级凭证 + 审计 ----------------
+def _hash(tok):
+    import hashlib
+    return hashlib.sha256((tok or "").encode("utf-8")).hexdigest()
+
+
+def register_device(device_id, token, actor="admin"):
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO devices(device_id,token_hash,created,revoked,last_seen) VALUES(?,?,?,0,?)",
+                  (device_id, _hash(token), datetime_now(), datetime_now()))
+        c.commit()
+    audit(actor, "device_register", device_id)
+    return device_id
+
+
+def verify_device(token):
+    if not token:
+        return None
+    h = _hash(token)
+    with _LOCK:
+        c = _db()
+        row = c.execute("SELECT device_id FROM devices WHERE token_hash=? AND revoked=0", (h,)).fetchone()
+    if row:
+        with _LOCK:
+            _db().execute("UPDATE devices SET last_seen=? WHERE device_id=?", (datetime_now(), row[0]))
+            _db().commit()
+        return row[0]
+    return None
+
+
+def revoke_device(device_id, actor="admin"):
+    with _LOCK:
+        c = _db()
+        c.execute("UPDATE devices SET revoked=1 WHERE device_id=?", (device_id,))
+        c.commit()
+    audit(actor, "device_revoke", device_id)
+    return device_id
+
+
+def device_count(active_only=True):
+    with _LOCK:
+        c = _db()
+        q = "SELECT COUNT(*) FROM devices" + (" WHERE revoked=0" if active_only else "")
+        return c.execute(q).fetchone()[0]
+
+
+def audit(actor, action, detail=""):
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT INTO audit(ts,actor,action,detail) VALUES(?,?,?,?)", (datetime_now(), actor, action, detail))
+        c.commit()
+
+
+def list_audit(limit=100):
+    with _LOCK:
+        rows = _db().execute("SELECT ts,actor,action,detail FROM audit ORDER BY id DESC LIMIT ?",
+                             (max(1, min(limit, 500)),)).fetchall()
+    return [dict(zip(("ts", "actor", "action", "detail"), r)) for r in rows]
+
+
+# ---------------- 田间结果（前瞻性盲测真值） ----------------
+OUTCOME_KINDS = {"采摘", "霜冻受灾", "高温灼伤", "连阴雨", "产量", "品质", "其他"}
+
+
+def add_outcome(rec):
+    with _LOCK:
+        c = _db()
+        c.execute("""INSERT INTO outcomes(ts,date,plot,kind,area_mu,damage_level,yield_kg,quality,note)
+                     VALUES(?,?,?,?,?,?,?,?,?)""",
+                  (rec.get("ts"), rec.get("date"), rec.get("plot"), rec.get("kind"), rec.get("area_mu"),
+                   rec.get("damage_level"), rec.get("yield_kg"), rec.get("quality"), rec.get("note")))
+        c.commit()
+        return c.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+
+
+def list_outcomes(limit=100):
+    with _LOCK:
+        rows = _db().execute("""SELECT ts,date,plot,kind,area_mu,damage_level,yield_kg,quality,note
+                                FROM outcomes ORDER BY id DESC LIMIT ?""", (max(1, min(limit, 500)),)).fetchall()
+    keys = ("ts", "date", "plot", "kind", "area_mu", "damage_level", "yield_kg", "quality", "note")
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def outcome_count():
+    with _LOCK:
+        return _db().execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+
+
+def datetime_now():
+    import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+    except Exception:  # noqa: BLE001
+        return datetime.datetime.now().isoformat(timespec="seconds")
 
 
 if __name__ == "__main__":
