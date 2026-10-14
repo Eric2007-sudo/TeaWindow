@@ -110,6 +110,8 @@ STRONG = [
     ("雨最大", "rain_max"), ("最大雨", "rain_max"), ("哪天雨", "rain_max"), ("降雨最大", "rain_max"),
     ("哪个风险", "compare"), ("哪个更高", "compare"), ("哪个高", "compare"), ("风险更高", "compare"),
     ("数据来源", "data_source"), ("从哪来", "data_source"), ("用什么模型", "model"), ("准确率", "model"),
+    ("传感器", "data_source"), ("台站", "data_source"), ("实时站", "data_source"), ("现场站", "data_source"),
+    ("受灾", "data_source"), ("产量", "data_source"), ("盲测", "data_source"), ("误报", "model"), ("漏报", "model"),
     ("哪块地", "plot"), ("地块", "plot"),
     # 逐日清单（放末尾，灾害类词优先命中）
     ("列举", "forecast_list"), ("列出", "forecast_list"), ("逐日", "forecast_list"),
@@ -339,7 +341,55 @@ def _reply(text, intent="unknown", chain=None):
             "chain": chain or ["自研问答引擎"]}
 
 
+_COMPOUND_CUES = [
+    ("风险", "risk_today"), ("数据", "data_source"), ("来源", "data_source"), ("哪来", "data_source"),
+    ("模型", "model"), ("准确", "model"), ("误报", "model"), ("漏报", "model"),
+    ("保险", "insurance"), ("保费", "insurance"), ("损失", "value"), ("值多少", "value"),
+    ("开采", "harvest_date"), ("防冻", "frost"), ("霜冻", "frost"), ("高温", "heat"),
+    ("干旱", "drought"), ("浇水", "drought"), ("灌溉", "drought"), ("降雨", "rain"), ("排水", "rain"),
+    ("该做什么", "decision"), ("做什么", "decision"), ("措施", "decision"), ("怎么办", "decision"), ("建议", "decision"),
+]
+
+
+def _compound_intents(q):
+    out = []
+    for k, it in _COMPOUND_CUES:
+        if k in q and it not in out:
+            out.append(it)
+    return out
+
+
+def _final_guard(q, txt):
+    """P0：输出业务校验——非春采期禁采摘措辞；指定日期须落到位；去占位。"""
+    txt = season.clean_text(txt)
+    if season.is_off():
+        for k in ["可正常采", "适合采", "建议采摘", "优先采", "先采"]:
+            if k in txt:
+                txt = season.care_hint() + "（" + txt.replace(k, "暂不推荐采摘") + "）"
+                break
+    try:
+        from . import nlg
+        ad = nlg._parse_abs_date(q)
+    except Exception:  # noqa: BLE001
+        ad = None
+    if ad is not None:
+        iso = ad.isoformat()
+        if iso not in txt and "超出" not in txt and "不在" not in txt:
+            txt += f"（目标日期 {iso}）"
+    return txt
+
+
 def answer(question, context=None, history=None):
+    r = _answer_impl(question, context, history)
+    try:
+        if isinstance(r, dict) and isinstance(r.get("text"), str):
+            r["text"] = _final_guard(question or "", r["text"])
+    except Exception:  # noqa: BLE001
+        pass
+    return r
+
+
+def _answer_impl(question, context=None, history=None):
     data = _load_data()
     q0 = (question or "").strip()
     if not q0:
@@ -354,21 +404,48 @@ def answer(question, context=None, history=None):
             and ("个月" in q0 or "季度" in q0 or "半年" in q0 or "一年" in q0)):
         return _reply("我们只能给出 16 天逐日预报与逐月气候概率（历史统计），"
                       "无法准确预测三个月后的逐日气温/降雨；更远的趋势请参考气候概率或官方季节预测。")
-    # 结构化上下文：上一条 user（topic 线索）与上一条 assistant（结论）
+    # 结构化上下文：上一条 user 与上一条 assistant（结论），并提取实体（目标日期）
     prev = ""
+    prev_assistant = ""
     if history:
         for m in reversed(history):
-            if m.get("role") == "user":
+            if m.get("role") == "user" and not prev:
                 prev = m.get("content", "") or ""
+            if m.get("role") == "assistant" and not prev_assistant:
+                prev_assistant = m.get("content", "") or ""
+            if prev and prev_assistant:
                 break
     stripped = _strip_negations(question)
     CONTINUE = {"继续", "然后", "然后呢", "接着", "接着说", "还有", "还有呢", "那呢", "继续呢", "接下来"}
     if q0 in CONTINUE and not prev:
         return _reply("请先告诉我想了解哪方面（如：今天风险、要不要防冻、先采哪块地），我再继续。")
 
+    carry = ""
+    mm = re.search(r"(20\d{2}-\d{2}-\d{2})", prev + " " + prev_assistant) or \
+        re.search(r"(\d{1,2})月(\d{1,2})日", prev_assistant)
+    if mm:
+        carry = mm.group(1) if (mm.lastindex or 1) <= 1 else f"{season.today().year}年{int(mm.group(1))}月{int(mm.group(2))}日"
+    pronoun = any(k in question for k in ["那一天", "那天", "它的", "这个", "该日", "它"])
+    # 指代"那一天采取什么措施"：直接按上一目标日给行动
+    if pronoun and carry and any(k in question for k in ["措施", "怎么办", "做什么", "咋办", "应对", "怎么处理"]):
+        dd = next((d for d in data["days"] if d["date"] == carry), None)
+        if dd is not None:
+            try:
+                from . import nlg as _nlg
+                return {"engine": "teawindow-own", "mode": "rules", "intent": "day_action", "confidence": 0.7,
+                        "backend": intent_backend(), "retrieval": retrieval_backend(), "slots": {}, "detail": False,
+                        "follow_up": True, "text": _nlg.day_advice(dd, season.is_off()),
+                        "chain": ["指代: 上一目标日 " + carry]}
+            except Exception:  # noqa: BLE001
+                pass
+
     follow_marks = ["呢", "那", "这个", "它", "详细", "展开", "为什么", "依据", "具体", "原因"]
     is_follow = (len(question) <= 12) and any(t in question for t in follow_marks) and not _strong_intent(stripped)
-    qt = (question + " " + prev) if (is_follow and prev) else question
+    qt = question
+    if (is_follow or pronoun) and prev:
+        qt = question + " " + prev
+    if carry and (is_follow or pronoun):
+        qt = qt + " " + carry
     qt_s = _strip_negations(qt)
 
     intent, conf = classify(qt_s)
@@ -376,23 +453,32 @@ def answer(question, context=None, history=None):
     strong = strongs[0] if strongs else None
     kw = _keyword_intent(qt_s)
 
-    # 复合问题：命中多个"主题"强意图 → 逐项回答（排除清单/对比这类"容器"意图）
-    topic_strongs = [s for s in strongs if s not in ("forecast_list", "rain_max", "compare")]
-    if not is_follow and len(topic_strongs) >= 2:
+    # 通用复合拆解：主题强意图 + 复合线索（风险/来源/模型/动作/具体灾害）
+    comp = [x for x in dict.fromkeys(
+        [s for s in strongs if s not in ("forecast_list", "rain_max", "compare", "greet")] + _compound_intents(question)
+    ) if x not in ("oos", "unknown", "greet")]
+    has_sep = any(sep in question for sep in ["、", ",", "，", "和", "同时", "以及", "还有"])
+    try:
+        from . import nlg as _nl
+        _field_query = bool(_nl._asks_fields(question) and
+                            (_nl._parse_abs_date(question) or _nl._day_offset(question) or _nl._horizon(question)))
+    except Exception:  # noqa: BLE001
+        _field_query = False
+    if not is_follow and not _field_query and (len(comp) >= 3 or (len(comp) >= 2 and has_sep)):
         try:
             from . import nlg as _nlg
         except Exception:  # noqa: BLE001
             _nlg = None
         if _nlg is not None:
             parts = []
-            for it in topic_strongs[:3]:
+            for it in comp[:3]:
                 rr = _nlg.compose(it, qt, _slots(qt, data), data)
                 parts.append(rr["text"])
-            return {"engine": "teawindow-own", "mode": "rules", "intent": "+".join(topic_strongs[:3]),
+            return {"engine": "teawindow-own", "mode": "rules", "intent": "+".join(comp[:3]),
                     "confidence": 0.9, "backend": intent_backend(), "retrieval": retrieval_backend(),
                     "slots": {}, "detail": False, "follow_up": False,
                     "text": _nlg.season.clean_text("；".join(parts)),
-                    "chain": ["复合问题拆解: " + "+".join(topic_strongs[:3])]}
+                    "chain": ["复合问题拆解: " + "+".join(comp[:3])]}
 
     if strong:
         intent, conf = strong, max(conf, 0.9)

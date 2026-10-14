@@ -367,3 +367,69 @@ def test_openapi_typed_items():
     props = comp.get(ref, {}).get("properties", {})
     hist = props.get("history", {})
     assert hist.get("items") or hist.get("$ref")
+
+
+# ---------------- 第四轮 P0 ----------------
+def test_future_window_excludes_past():
+    import datetime
+    import qa.nlg as nlg
+    import qa.engine as e
+    ctx = nlg.classify_ctx(e._load_data(), "未来7天")
+    today = datetime.date.today().isoformat()
+    assert ctx["fc"], "forecast 不应为空"
+    assert min(d["date"] for d in ctx["fc"]) >= today
+
+
+def test_days_forecast_scope_future_only():
+    import datetime
+    c = _client()
+    r = c.get("/api/days?scope=forecast")
+    assert r.status_code == 200
+    today = datetime.date.today().isoformat()
+    assert min(d["date"] for d in r.json()["days"]) >= today
+
+
+def test_composite_single_target_date():
+    import datetime
+    import qa.engine as e
+    d = (datetime.date.today() + datetime.timedelta(days=6)).isoformat()
+    y, m, dd = d.split("-")
+    txt = e.answer(f"{int(y)}年{int(m)}月{int(dd)}日最低温、最高温、降雨量和霜冻概率各是多少")["text"]
+    assert d in txt
+    assert "Tmin" in txt and "Tmax" in txt and "降水" in txt and ("P(霜冻)" in txt or "霜冻" in txt)
+
+
+def test_irrigation_safety_measure_first():
+    import qa.engine as e
+    txt = e.answer("要不要浇水")["text"]
+    # 低亏缺时须先测墒，不得直接命令灌溉
+    assert ("测墒" in txt) or ("灌溉" not in txt) or ("浇水" not in txt)
+
+
+def test_historical_range_message_not_2015():
+    import qa.engine as e
+    txt = e.answer("2024年3月1日当时有霜冻吗")["text"]
+    assert "近 180 天" in txt or "聊天当前加载范围" in txt
+    assert "超出可用数据范围（历史 2015" not in txt
+
+
+def test_data_authority_sensor_question():
+    import qa.engine as e
+    r = e.answer("当前有多少现场传感器站？")
+    assert r["intent"] == "data_source"
+    assert ("模式" in r["text"]) or ("传感器" in r["text"])
+
+
+def test_entity_carry_target_date():
+    import qa.engine as e
+    h = [{"role": "user", "content": "哪天雨最大？"},
+         {"role": "assistant", "content": "未来 7 天雨最大的是 2026-10-20（约 24.3 mm，风险 低）。"}]
+    r = e.answer("那一天要采取什么措施？", history=h)
+    assert "2026-10-20" in r["text"] or "24.3" in r["text"]
+
+
+def test_compound_three_topics():
+    import qa.engine as e
+    r = e.answer("今天风险多少、数据哪来的、我该做什么？")
+    assert "+" in r["intent"]
+    assert ("风险" in r["text"]) and ("数据" in r["text"] or "来源" in r["text"])

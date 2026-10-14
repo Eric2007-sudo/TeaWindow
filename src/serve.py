@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import datetime
+import concurrent.futures as _cf
 
 SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
@@ -31,6 +32,7 @@ DATA_JSON = os.path.join(WEB, "data.json")
 
 _refresh_lock = threading.Lock()
 _advice_cache = {}
+_ASK_EXEC = _cf.ThreadPoolExecutor(max_workers=4)   # 问答内部超时用
 
 
 def _season_of(d=None):
@@ -88,7 +90,7 @@ class AskResp(BaseModel):
     confidence: float | None = None
     backend: str | None = None
     text: str
-    chain: list = Field(default_factory=list)
+    chain: list[str] = Field(default_factory=list)
     follow_up: bool = False
     source: str | None = None
     base_text: str | None = None
@@ -221,7 +223,8 @@ def days(scope: str = "recent"):
         raise HTTPException(422, "scope must be 'recent' | 'forecast' | 'history'")
     d = _load()
     if scope == "forecast":
-        return {"scope": scope, "days": [x for x in d["days"] if x["source"] == "forecast"]}
+        today = season.iso_today()
+        return {"scope": scope, "days": [x for x in d["days"] if x["source"] == "forecast" and x["date"] >= today]}
     if scope == "history":
         return {"scope": scope, "days": [x for x in d["days"] if x["source"] == "history"]}
     return {"scope": scope, "days": d["days"]}
@@ -311,7 +314,16 @@ class ErrorResp(BaseModel):
 
 def _ask(q, engine, history=None):
     from qa import engine as qa_engine
-    base = qa_engine.answer(q, _context(), history or [])
+    try:
+        fut = _ASK_EXEC.submit(qa_engine.answer, q, _context(), history or [])
+        base = fut.result(timeout=float(os.environ.get("ASK_TIMEOUT", "8")))
+    except _cf.TimeoutError:
+        base = {"engine": "teawindow-own", "mode": "rules", "intent": "timeout", "confidence": 0.0,
+                "backend": None, "retrieval": None,
+                "text": "抱歉，本次处理超时。请简化问题（如：今天有风险吗 / 要不要防冻 / 先采哪块地）后重试。"}
+    except Exception:  # noqa: BLE001
+        base = {"engine": "teawindow-own", "mode": "rules", "intent": "error", "confidence": 0.0,
+                "backend": None, "retrieval": None, "text": "抱歉，处理出错，请稍后重试或换个说法。"}
     if engine == "llm":
         if not _llm_spend():
             # P0-4：每日预算用尽 → 直接回退自研规则，不调用外部模型

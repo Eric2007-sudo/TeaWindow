@@ -114,7 +114,9 @@ def _dlab(off, date):
 
 def classify_ctx(data, q):
     days = data["days"]
-    fc = [d for d in days if d["source"] == "forecast"]
+    today = season.iso_today()
+    # P0：所有"未来窗口"先过滤 date>=业务今天，再取 N 天
+    fc = [d for d in days if d["source"] == "forecast" and d["date"] >= today]
     hist = [d for d in days if d["source"] == "history"]
     cur = current_day(days)
     H = _horizon(q) or 7
@@ -187,8 +189,7 @@ def _months_of(H):
 def frost(ctx, q, detail):
     d, off = _focus_day(ctx, q)
     if off is not None and d is None and isinstance(off, str):
-        return (f"{off} 超出可用数据范围（历史 2015 至今 + 未来 16 天预报），无法判断该日霜冻。",
-                ["数据范围: 历史+16天预报"])
+        return (_range_msg(off), ["数据范围: 聊天近180天+16天预报"])
     if d is not None:
         need = d.get("frost") or d.get("cold_shock")
         lab = _dlab(off, d["date"])
@@ -230,8 +231,7 @@ def frost(ctx, q, detail):
 def heat(ctx, q, detail):
     d, off = _focus_day(ctx, q)
     if off is not None and d is None and isinstance(off, str):
-        return (f"{off} 超出可用数据范围（历史 2015 至今 + 未来 16 天预报），无法判断该日高温。",
-                ["数据范围: 历史+16天预报"])
+        return (_range_msg(off), ["数据范围: 聊天近180天+16天预报"])
     if d is not None:
         lab = _dlab(off, d["date"])
         need = (d.get("tmax") or 0) >= 33
@@ -259,20 +259,19 @@ def drought(ctx, q, detail):
     deficit = cur.get("deficit", 0) or 0
     soil = cur.get("soil", None)
     bal = "水量盈余" if deficit < 0 else "水分亏缺"
-    dry_need = dry >= 5
-    deficit_need = deficit >= 45
     soil_need = (soil is not None and soil < 0.25)
-    conflict = dry_need and deficit < 0 and not (deficit_need or soil_need)
-    if not (dry_need or deficit_need or soil_need):
-        text = _pick(["暂不用灌溉。", "不用急着浇水。", "水分尚可。"], q) + \
-            f" 已连旱 {dry} 天、10日{bal} {abs(deficit):.1f}mm（土壤含水 {soil}，模式估计），暂无明显旱情。"
-    elif conflict:
-        text = ("建议先巡查/测墒，暂不直接灌溉。"
-                f" 已连续 {dry} 天少雨，但 10 日累计{bal} {abs(deficit):.1f}mm（降水多于蒸散），"
-                f"土壤含水 {soil}（Open-Meteo 模式估计，非田间实测）；请结合根层墒情、坡位与现场观察再决定。")
-    else:
+    need_irrigate = (deficit >= 45) or soil_need
+    if need_irrigate:
         text = _pick(["建议灌溉。", "要补水。", "该浇一次水了。"], q) + \
             f" 已连续 {dry} 天少雨、10日{bal} {abs(deficit):.1f}mm（土壤 {soil}，模式估计）；早晚浇透根层、稻草覆盖保墒，优先幼龄/向阳坡。"
+    elif dry >= 5:
+        # P0：低亏缺且无现场探头 → 先测墒，不直接命令灌溉
+        text = ("建议先测量根层墒情，暂不直接灌溉。"
+                f" 模式提示已连续 {dry} 天少雨，但 10 日{bal} {abs(deficit):.1f}mm 未达亏缺阈值（45mm）；"
+                f"土壤含水 {soil}（Open-Meteo 模式估计，非田间实测）。若现场墒情低于地块阈值，再于早晚补水。")
+    else:
+        text = _pick(["暂不用灌溉。", "不用急着浇水。", "水分尚可。"], q) + \
+            f" 已连旱 {dry} 天、10日{bal} {abs(deficit):.1f}mm（土壤含水 {soil}，模式估计），暂无明显旱情。"
     chains = ["数据: Open-Meteo（水分平衡=ET0−降水；负值为盈余）", "模型: 干旱(水分亏缺+土壤含水量·模式估计)"]
     if detail:
         text += " 依据：dry_run、10日水分平衡(ET0−降水)、0–7cm 土壤含水量；ET0−降水≥45mm 记亏缺。土壤水分为模式估计，非田间传感器。"
@@ -389,6 +388,34 @@ def harvest_date(ctx, q, detail):
 
 
 def data_source(ctx, q, detail):
+    # 数据权威性深答：区分模式/台站/遥感/现场传感器与验证边界
+    if any(k in q for k in ["传感器", "实测站", "探头", "实时", "现场"]):
+        try:
+            import store
+            n = store.sensor_count()
+        except Exception:  # noqa: BLE001
+            n = 0
+        return (f"当前在线现场传感器记录 {n} 条（/api/realtime 实时展示）。"
+                "注意：页面土壤湿度来自 Open-Meteo 模式字段（0–7cm），**不是**茶园探头实测；"
+                "模式估计、台站观测、遥感反演、现场传感器必须分别看待。",
+                ["数据性质: 模式/台站/遥感/传感器区分", "披露: 现场实测站数"])
+    if any(k in q for k in ["台站", "距离", "误差", "偏差", "多远", "杭州站"]):
+        return ("台站为 Meteostat 杭州站（WMO 58457），距梅家坞约 7.1 km；"
+                "对 ERA5：Tmin 偏差 +2.88℃（MAE 2.90℃）、Tmax +3.34℃（MAE 3.38℃）、降水 MAE 3.30mm（r≈0.71）。"
+                "高相关说明趋势相似，但偏差量级接近霜冻阈值（2/4℃），不能据此断言地块级霜冻准确。"
+                "当前线上风险**未采用**台站偏差订正（daily_corrected.csv 仅作交叉验证）。",
+                ["来源: Meteostat WMO58457", "披露: 未用于当前预测"])
+    if any(k in q for k in ["受灾", "产量", "品质", "验证", "标签", "真实", "盲测"]):
+        return ("目前**没有**真实受灾/产量/品质的前瞻性验证：风险标签为专家规则（弱标签），"
+                "AUC 属弱标签复现指标；事件回测仅 7 个正事件、无负事件与滚动预报回放。"
+                "需完成完整春采季的田间盲测与地块级闭环才能证明业务效果。",
+                ["披露: 无真实标签/无盲测"])
+    if any(k in q for k in ["链接", "出处", "网站", "原始", "下载", "许可", "license"]):
+        return ("上游来源（可核验）：Open-Meteo https://open-meteo.com/en/docs ；"
+                "Meteostat https://dev.meteostat.net/ ；NASA GIBS https://gibs.earthdata.nasa.gov/ ；"
+                "Copernicus Sentinel-2 https://documentation.dataspace.copernicus.eu/ 。"
+                "聊天暂不返回每项原始字段/抓取时间戳的版本身份。",
+                ["来源: 可点击链接", "局限: 无逐项版本"])
     kg = ctx["data"].get("_kg") or {}
     from . import engine as _e  # 复用 knowledge
     kg = _e._load_kg()
@@ -436,7 +463,8 @@ def day_advice(d, season_off=False):
     concl = []
     dsh, heat = d.get("cold_shock"), d.get("heat")
     deficit = d.get("deficit") or 0
-    dry = (deficit >= 45) or ((d.get("dry_run") or 0) >= 5 and deficit >= 0)
+    soil = d.get("soil")
+    dry = (deficit >= 45) or (soil is not None and soil < 0.25)
     wet = (d.get("wet_run") or 0) >= 4 or (d.get("precip") or 0) >= 15
     suit = d.get("suitability") or 0
     tmin, tmax, precip = d.get("tmin"), d.get("tmax"), d.get("precip")
@@ -462,7 +490,9 @@ def day_advice(d, season_off=False):
     if heat:
         acts.append(f"Tmax {tmax}℃，上遮阳网、傍晚浇透水")
     if dry:
-        acts.append(f"连旱{d.get('dry_run',0)}天/亏缺{d.get('deficit')}，早晚浇透并覆盖保墒")
+        acts.append(f"亏缺{d.get('deficit')}mm/土壤{soil}，若现场墒情低于地块阈值再早晚浇透并覆盖保墒")
+    elif (d.get("dry_run") or 0) >= 5:
+        acts.append(f"连旱{d.get('dry_run',0)}天但亏缺未达阈值，建议先测根层墒情再决定是否补水")
     if wet:
         acts.append(f"连雨{d.get('wet_run',0)}天/降水{precip}mm，清沟排水、鲜叶及时摊青")
     if suit >= 40 and not (d.get("frost") or heat or dry or wet):
@@ -539,6 +569,64 @@ def forecast_list(ctx, q, detail):
     return out, ["数据: Open-Meteo 16天预报", "模型: GBDT复合风险"]
 
 
+FIELD_KW = ["最低", "最高", "温度", "气温", "降雨", "降水", "雨量", "霜冻", "概率",
+            "风险", "适宜度", "风速", "湿度", "不确定", "区间", "多少"]
+
+
+def _asks_fields(q):
+    return sum(1 for k in FIELD_KW if k in q) >= 2
+
+
+def _range_msg(iso):
+    """区分'数据仓库范围'与'聊天当前加载范围'，避免自相矛盾文案。"""
+    try:
+        y = int(str(iso)[:4])
+    except Exception:  # noqa: BLE001
+        y = 0
+    if y and y < 2015:
+        return f"{iso} 早于气象数据起始（2015 年），无法查询。"
+    return (f"{iso} 不在聊天当前加载范围（近 180 天历史 + 未来 16 天预报）；"
+            f"数据仓库有 2015 至今，但聊天接口暂未接入按需历史查询。")
+
+
+def day_detail(ctx, q, detail):
+    """复合字段问题：所有字段使用同一个目标日/时段，避免混用时间窗口。"""
+    d, off = _focus_day(ctx, q)
+    if d is None:
+        if isinstance(off, str):
+            return _range_msg(off), ["数据范围: 聊天近180天+16天预报"]
+        # 无目标日但有天数 → 逐日字段列表
+        fc = ctx["fc"][:ctx["H"]]
+        if fc:
+            lines = [f"{x['date'][5:]} Tmax{x.get('tmax')}/Tmin{x.get('tmin')}℃ 雨{x.get('precip')}mm "
+                     f"{x.get('risk_level')}(R={x.get('risk_R')})" for x in fc]
+            return ("未来 %d 天逐日（温度/降雨/风险）：\n- " % len(fc)) + "\n- ".join(lines), \
+                ["数据: Open-Meteo 16天预报", "模型: 复合风险"]
+        return None
+    lab = _dlab(off, d["date"])
+    parts = []
+    if d.get("tmin") is not None:
+        parts.append(f"Tmin {d['tmin']}℃")
+    if d.get("tmax") is not None:
+        parts.append(f"Tmax {d['tmax']}℃")
+    if d.get("precip") is not None:
+        parts.append(f"降水 {d['precip']}mm")
+    if d.get("p_frost") is not None:
+        parts.append(f"P(霜冻) {d['p_frost']}")
+    elif d.get("frost") is not None:
+        parts.append("霜冻 " + ("有" if d.get("frost") else "无"))
+    if d.get("p_heat") is not None:
+        parts.append(f"P(高温) {d['p_heat']}")
+    parts.append(f"风险 {d.get('risk_level')}（R={d.get('risk_R')}）")
+    parts.append(f"适宜度 {int(d.get('suitability') or 0)}")
+    text = f"{lab}：" + "，".join(parts) + "。"
+    if d.get("tmin_lo") is not None:
+        text += f" 集合区间：Tmin {d['tmin_lo']}–{d['tmin_hi']}℃、Tmax {d['tmax_lo']}–{d['tmax_hi']}℃。"
+    if season.is_off():
+        text += " " + season.care_hint()
+    return text, ["数据: Open-Meteo 逐日+集合（同一目标日口径）", "模型: 复合风险"]
+
+
 HANDLERS = {
     "frost": frost, "heat": heat, "drought": drought, "rain": rain,
     "pick_window": pick_window, "schedule": schedule, "decision": decision, "plot": plot,
@@ -552,6 +640,12 @@ HANDLERS = {
 def compose(intent, q, sl, data):
     ctx = classify_ctx(data, q)
     detail = want_detail(q)
+    # 复合字段问题（含目标日/时段 + 多个字段）：强制同一目标日口径
+    _other = any(k in q for k in ["数据", "来源", "哪来", "模型", "做什么", "怎么办", "措施", "保险", "损失"])
+    if not _other and _asks_fields(q) and (_parse_abs_date(q) or _day_offset(q) or _horizon(q)):
+        dd = day_detail(ctx, q, detail)
+        if dd is not None:
+            return {"text": season.clean_text(dd[0]), "chain": dd[1], "detail": detail}
     if intent in HANDLERS and HANDLERS[intent]:
         text, chains = HANDLERS[intent](ctx, q, detail)
     elif intent == "risk_today":

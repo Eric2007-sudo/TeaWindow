@@ -181,7 +181,7 @@ def rephrase_keep_numbers(question, base_text):
                  "（'要/不要'、'适合采/不宜采'、'防冻/不防冻'等）；不得删除季节或数据时效提示；"
                  "只把句子改得更口语、通顺；输出不超过原文长度的1.2倍；直接输出润色后的整段文字。")
         try:
-            r = requests.post(API_URL, timeout=60,
+            r = requests.post(API_URL, timeout=20,
                               headers={"Authorization": "Bearer " + os.environ["DEEPSEEK_API_KEY"],
                                        "Content-Type": "application/json"},
                               json={"model": MODEL,

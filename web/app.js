@@ -45,8 +45,10 @@
     { k: offSeason ? "非春采期（养护为主）" : "推荐采摘窗口",
       v: offSeason ? "—" : (win.date || "–").slice(5),
       s: offSeason ? "春采季 3–4 月；当前以防冻/防旱/排涝等养护为主" : `适宜度 ${fmt(win.suitability)} · 风险 ${win.risk_level || "–"}` },
-    { k: "今日行动建议", v: (D.decision && D.decision.days && D.decision.days[0]) ? D.decision.days[0].recommend : "–",
-      s: `最佳采摘日 ${D.decision ? (D.decision.best_pick_day || "–") : "–"}` }
+    offSeason
+      ? { k: "今日行动建议", v: "养护", s: "防冻/防旱/排涝巡查 + 修剪/施肥/越冬准备（非春采期）" }
+      : { k: "今日行动建议", v: (D.decision && D.decision.days && D.decision.days[0]) ? D.decision.days[0].recommend : "–",
+          s: `最佳采摘日 ${D.decision ? (D.decision.best_pick_day || "–") : "–"}` }
   ];
   const notes = [];
   if (!online) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e08a3c"><div class="k">数据来源</div><div class="v" style="font-size:15px;color:#e08a3c">⚠️ 离线/缓存（演示）数据，非实时；行动建议请以在线服务与官方预警为准</div></div>`);
