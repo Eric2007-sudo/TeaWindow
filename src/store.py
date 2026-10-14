@@ -1,60 +1,124 @@
 """
-轻量持久化：SQLite 存储众包上报与传感器观测（替代直接追加 JSONL）。
+持久化层：默认 SQLite；支持 `DATABASE_URL`（`sqlite:///…` 指向持久卷；`postgres://…` 走 Postgres 适配）。
 - 幂等：传感器以 (station_id, ts) 唯一，重复/重放不重复入库。
-- 记录服务器接收时间 received 与质量校验。
-- 说明：免费托管磁盘本身可能短暂，生产应接外部数据库；本模块保证单实例内的持久与去重。
+- 说明：Postgres 适配为占位符/upsert 翻译层，本机以 SQLite 验证；生产接入 Postgres 前请回归测试。
 """
 import json
 import os
+import re
 import sqlite3
 import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.environ.get("TW_DB", os.path.join(ROOT, "data", "teawindow.db"))
+
+
+def _resolve_db():
+    url = os.environ.get("DATABASE_URL") or os.environ.get("TW_DB_URL") or ""
+    if url.startswith("sqlite:///"):
+        p = url[len("sqlite:///"):]
+        path = p if os.path.isabs(p) else os.path.join(ROOT, p)
+        return path, "sqlite", url
+    if url.startswith("postgres://") or url.startswith("postgresql://"):
+        return None, "postgres", url
+    return os.environ.get("TW_DB", os.path.join(ROOT, "data", "teawindow.db")), "sqlite", url
+
+
+DB_PATH, _DIALECT, _DB_URL = _resolve_db()
 _LOCK = threading.Lock()
 _conn = None
 
 SENSOR_FIELDS = ("temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
+_UPSERT_PK = {"devices": "device_id", "forecast_days": "version_id,date", "refresh_state": "k", "alerts_state": "k"}
+
+
+def _tr(sql):
+    """为 Postgres 翻译占位符与 upsert 语法（SQLite 原样）。"""
+    if _DIALECT != "postgres":
+        return sql
+    s = sql
+    if "INSERT OR IGNORE" in s:
+        s = s.replace("INSERT OR IGNORE", "INSERT").rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+    elif "INSERT OR REPLACE" in s:
+        m = re.match(r"\s*INSERT OR REPLACE INTO (\w+)\s*\(([^)]*)\)", s)
+        s = s.replace("INSERT OR REPLACE INTO", "INSERT INTO")
+        if m:
+            tbl, cols = m.group(1), [c.strip() for c in m.group(2).split(",")]
+            pk = _UPSERT_PK.get(tbl)
+            if pk:
+                pks = [x.strip() for x in pk.split(",")]
+                sets = ",".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in pks)
+                s = s.rstrip().rstrip(";") + f" ON CONFLICT ({pk})" + (f" DO UPDATE SET {sets}" if sets else " DO NOTHING")
+    return s.replace("?", "%s")
+
+
+class _Cur:
+    def __init__(self, cur):
+        self._c = cur
+        self.rowcount = getattr(cur, "rowcount", 0)
+        self.description = getattr(cur, "description", None)
+
+    def fetchone(self):
+        return self._c.fetchone()
+
+    def fetchall(self):
+        return self._c.fetchall()
+
+
+class _PgConn:
+    """psycopg 连接的轻量包装，使既有 `?` 占位符与 `INSERT OR ...` 语法可复用。"""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def execute(self, sql, params=()):
+        cur = self._raw.cursor()
+        cur.execute(_tr(sql), params)
+        return _Cur(cur)
+
+    def commit(self):
+        self._raw.commit()
+
+    def close(self):
+        self._raw.close()
+
+
+def _ddl():
+    ai = "BIGSERIAL PRIMARY KEY" if _DIALECT == "postgres" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    cols = ",".join(f"{f} REAL" for f in SENSOR_FIELDS)
+    return [
+        f"CREATE TABLE IF NOT EXISTS reports(id {ai}, ts TEXT, date TEXT, plot TEXT, kind TEXT, note TEXT)",
+        f"CREATE TABLE IF NOT EXISTS sensor(station_id TEXT NOT NULL, ts TEXT NOT NULL, received TEXT, note TEXT, {cols}, PRIMARY KEY(station_id, ts))",
+        f"CREATE TABLE IF NOT EXISTS data_versions(id {ai}, ts TEXT, source TEXT, model TEXT, gen_time TEXT, fetched_at TEXT, lat REAL, lon REAL, raw_sha256 TEXT, n_days INTEGER, build TEXT, note TEXT)",
+        "CREATE TABLE IF NOT EXISTS forecast_days(version_id INTEGER, date TEXT, tmin REAL, tmax REAL, precip REAL, p_frost REAL, p_heat REAL, risk_R REAL, risk_level TEXT, PRIMARY KEY(version_id, date))",
+        "CREATE TABLE IF NOT EXISTS devices(device_id TEXT PRIMARY KEY, token_hash TEXT, created TEXT, revoked INTEGER DEFAULT 0, last_seen TEXT)",
+        f"CREATE TABLE IF NOT EXISTS audit(id {ai}, ts TEXT, actor TEXT, action TEXT, detail TEXT)",
+        f"CREATE TABLE IF NOT EXISTS outcomes(id {ai}, ts TEXT, date TEXT, plot TEXT, kind TEXT, area_mu REAL, damage_level TEXT, yield_kg REAL, quality TEXT, note TEXT)",
+        "CREATE TABLE IF NOT EXISTS refresh_state(k TEXT PRIMARY KEY, ts TEXT, status TEXT, duration_s REAL, error TEXT, last_success TEXT, next_planned TEXT)",
+        f"CREATE TABLE IF NOT EXISTS verifications(id {ai}, ts TEXT, build TEXT, sha256 TEXT, summary TEXT, payload TEXT)",
+        "CREATE TABLE IF NOT EXISTS alerts_state(k TEXT PRIMARY KEY, ts TEXT, codes TEXT)",
+    ]
 
 
 def _db():
     global _conn
     if _conn is None:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute("""CREATE TABLE IF NOT EXISTS reports(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, date TEXT, plot TEXT, kind TEXT, note TEXT)""")
-        cols = ",".join(f"{f} REAL" for f in SENSOR_FIELDS)
-        _conn.execute(f"""CREATE TABLE IF NOT EXISTS sensor(
-            station_id TEXT NOT NULL, ts TEXT NOT NULL, received TEXT, note TEXT, {cols},
-            PRIMARY KEY(station_id, ts))""")
-        # 数据版本 / 预报快照（用于提前期误差评估与数据血缘）
-        _conn.execute("""CREATE TABLE IF NOT EXISTS data_versions(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, source TEXT, model TEXT, gen_time TEXT,
-            fetched_at TEXT, lat REAL, lon REAL, raw_sha256 TEXT, n_days INTEGER, build TEXT, note TEXT)""")
-        _conn.execute("""CREATE TABLE IF NOT EXISTS forecast_days(
-            version_id INTEGER, date TEXT, tmin REAL, tmax REAL, precip REAL, p_frost REAL, p_heat REAL,
-            risk_R REAL, risk_level TEXT, PRIMARY KEY(version_id, date))""")
-        # 设备级凭证（哈希存储）+ 审计
-        _conn.execute("""CREATE TABLE IF NOT EXISTS devices(
-            device_id TEXT PRIMARY KEY, token_hash TEXT, created TEXT, revoked INTEGER DEFAULT 0, last_seen TEXT)""")
-        _conn.execute("""CREATE TABLE IF NOT EXISTS audit(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, detail TEXT)""")
-        # 田间结果（前瞻性盲测真值）
-        _conn.execute("""CREATE TABLE IF NOT EXISTS outcomes(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, date TEXT, plot TEXT, kind TEXT,
-            area_mu REAL, damage_level TEXT, yield_kg REAL, quality TEXT, note TEXT)""")
-        # 刷新任务状态（外部定时/队列可写）
-        _conn.execute("""CREATE TABLE IF NOT EXISTS refresh_state(
-            k TEXT PRIMARY KEY, ts TEXT, status TEXT, duration_s REAL, error TEXT,
-            last_success TEXT, next_planned TEXT)""")
-        # 验证运行归档（把"预测验证"也纳入血缘）
-        _conn.execute("""CREATE TABLE IF NOT EXISTS verifications(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, build TEXT, sha256 TEXT, summary TEXT, payload TEXT)""")
-        # 告警通知状态（避免重复推送）
-        _conn.execute("""CREATE TABLE IF NOT EXISTS alerts_state(
-            k TEXT PRIMARY KEY, ts TEXT, codes TEXT)""")
+        if _DIALECT == "postgres":
+            try:
+                import psycopg  # noqa: PLC0415
+                _conn = _PgConn(psycopg.connect(_DB_URL))
+            except Exception as e:  # noqa: BLE001
+                print("[store] Postgres 不可用，回退 SQLite:", e)
+                globals()["_DIALECT"] = "sqlite"
+        if _DIALECT != "postgres":
+            path = DB_PATH or os.path.join(ROOT, "data", "teawindow.db")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            _conn = sqlite3.connect(path, check_same_thread=False)
+            _conn.execute("PRAGMA journal_mode=WAL")
+        for stmt in _ddl():
+            try:
+                _conn.execute(stmt)
+            except Exception:  # noqa: BLE001
+                pass
         for col, typ in (("upstream_url", "TEXT"), ("params", "TEXT"), ("raw_sha256_full", "TEXT")):
             try:
                 _conn.execute(f"ALTER TABLE data_versions ADD COLUMN {col} {typ}")
@@ -62,6 +126,10 @@ def _db():
                 pass
         _conn.commit()
     return _conn
+
+
+def db_info():
+    return {"dialect": _DIALECT, "url_configured": bool(_DB_URL), "path": DB_PATH}
 
 
 def add_report(rec):
@@ -140,7 +208,12 @@ def save_snapshot(meta, days):
                          meta.get("fetched_at"), meta.get("lat"), meta.get("lon"), meta.get("raw_sha256"),
                          len(days), meta.get("build"), meta.get("note"),
                          meta.get("upstream_url"), meta.get("params"), meta.get("raw_sha256_full")))
-        vid = cur.lastrowid
+        vid = getattr(cur, "lastrowid", None)
+        if not vid:
+            try:
+                vid = c.execute("SELECT MAX(id) FROM data_versions").fetchone()[0]
+            except Exception:  # noqa: BLE001
+                vid = 0
         for d in days:
             c.execute("""INSERT OR REPLACE INTO forecast_days(version_id,date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level)
                          VALUES(?,?,?,?,?,?,?,?,?)""",

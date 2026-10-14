@@ -839,7 +839,8 @@ def metrics(request: Request):
             "refresh": fr.get("refresh"), "build": fr.get("build"),
             "llm_usage": _llm_usage, "llm_daily_budget": LLM_DAILY_BUDGET,
             "sensor_count": store.sensor_count(), "device_active": store.device_count(),
-            "versions": store.version_count(), "outcomes": store.outcome_count()}
+            "versions": store.version_count(), "outcomes": store.outcome_count(),
+            "db": store.db_info()}
 
 
 @app.get("/api/updates")

@@ -589,3 +589,20 @@ def test_alerts_test_endpoint(monkeypatch):
     c = _client()
     r = c.post("/api/alerts/test", headers={"X-Admin-Token": "adm"})
     assert r.status_code == 200 and "notified" in r.json()
+
+
+# ---------------- 存储适配（DATABASE_URL / Postgres 翻译） ----------------
+def test_store_db_info():
+    import store
+    info = store.db_info()
+    assert info["dialect"] in ("sqlite", "postgres")
+    assert "path" in info
+
+
+def test_store_postgres_sql_translation(monkeypatch):
+    import store
+    monkeypatch.setattr(store, "_DIALECT", "postgres")
+    s1 = store._tr("INSERT OR IGNORE INTO sensor(station_id,ts) VALUES(?,?)")
+    assert "%s" in s1 and "ON CONFLICT DO NOTHING" in s1
+    s2 = store._tr("INSERT OR REPLACE INTO refresh_state(k,ts,status) VALUES(?,?,?)")
+    assert "ON CONFLICT (k)" in s2 and "EXCLUDED.status" in s2

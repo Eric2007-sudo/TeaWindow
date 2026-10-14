@@ -1,0 +1,25 @@
+name: Verify & alerts (external cron)
+
+# 与内置 apscheduler 互补：Render 免费层休眠时内置任务可能不触发。
+# 由 GitHub Actions 每 6 小时调用线上验证刷新（需 ADMIN_TOKEN secret），并读取告警。
+on:
+  schedule:
+    - cron: "35 1,7,13,19 * * *"   # UTC；约每 6 小时
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger verification refresh (authoritative lead-time + spring frost)
+        run: |
+          curl -sS -m 300 -X POST "https://teawindow.onrender.com/api/forecast/verify/refresh?days=60" \
+               -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}" || true
+          echo ""
+      - name: Read alerts
+        run: |
+          curl -sS -m 60 "https://teawindow.onrender.com/api/alerts" || true
+          echo ""
+      - name: Verify history (latest run meta)
+        run: |
+          curl -sS -m 60 "https://teawindow.onrender.com/api/forecast/verify/history?limit=3" || true

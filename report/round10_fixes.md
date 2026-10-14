@@ -74,3 +74,8 @@
 - **验证入库血缘**：`verifications` 表（run 时间/build/SHA-256/汇总）；`/api/forecast/verify` 优先返回最新入库结果；`/api/forecast/verify/history` 历史；**每 6 小时**自动跑。
 - **告警通知**：`ALERT_WEBHOOK_URL`；仅在告警**新增/变化**时推送（状态存 `alerts_state`）；**每 30 分钟**检查；`POST /api/alerts/test`（管理员）发测试；`/api/alerts` 增 `webhook_configured/notified`。
 - 测试 83 → **85**。
+
+## 十二、外部定时器 + 外部数据库（本轮）
+- `.github/workflows/verify.yml`：GitHub Actions **每 6 小时**调用 `/api/forecast/verify/refresh`（需 `ADMIN_TOKEN` secret）+ 读取 `/api/alerts` 与验证历史，与内置 apscheduler 互补（免费层休眠时保底）。
+- 存储适配：`DATABASE_URL` 支持 `sqlite:///…`（持久卷）与 `postgres://…`（占位符/upsert 翻译 + DDL 切换，缺驱动自动回退）；`/api/metrics.db` 展示 dialect。
+- 测试 85 → **87**。
