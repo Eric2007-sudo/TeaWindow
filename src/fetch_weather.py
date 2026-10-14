@@ -52,17 +52,23 @@ def _now():
         return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _get(url, params, retries=3):
+def _get(url, params, retries=5):
     last = None
     for i in range(retries):
         try:
             r = requests.get(url, params=params, timeout=60,
                              headers={"User-Agent": "TeaWindow/1.0"})
+            if r.status_code == 429:
+                wait = int(r.headers.get("Retry-After", 0)) or (8 * (i + 1))
+                print(f"  [fetch] 429 限流，等待 {wait}s 重试 ({i+1}/{retries})")
+                time.sleep(min(wait, 90))
+                last = RuntimeError("429 Too Many Requests")
+                continue
             r.raise_for_status()
             return r.json()
         except Exception as e:  # noqa: BLE001
             last = e
-            time.sleep(2 + i * 2)
+            time.sleep(2 + i * 3)
     raise RuntimeError(f"请求失败: {last}")
 
 
@@ -100,12 +106,17 @@ def main():
     if len(sys.argv) > 2 and _isdate(sys.argv[2]):
         end = sys.argv[2]
 
-    print(f"[archive] {start} ~ {end} @ ({LAT},{LON})")
-    arc = fetch_archive(start, end)
-    with open(os.path.join(RAW, "weather_archive.json"), "w", encoding="utf-8") as f:
-        json.dump(arc, f, ensure_ascii=False)
-    n = len(arc.get("daily", {}).get("time", []))
-    print(f"  历史天数={n}")
+    forecast_only = os.environ.get("TW_FETCH_FORECAST_ONLY") == "1"
+    if forecast_only and os.path.exists(os.path.join(RAW, "weather_archive.json")):
+        print("[archive] 轻量刷新：沿用已有历史（跳过 archive 抓取）")
+        arc = {"daily": {"time": []}}
+    else:
+        print(f"[archive] {start} ~ {end} @ ({LAT},{LON})")
+        arc = fetch_archive(start, end)
+        with open(os.path.join(RAW, "weather_archive.json"), "w", encoding="utf-8") as f:
+            json.dump(arc, f, ensure_ascii=False)
+        n = len(arc.get("daily", {}).get("time", []))
+        print(f"  历史天数={n}")
 
     print("[forecast] 未来 16 天")
     fc = fetch_forecast(16)

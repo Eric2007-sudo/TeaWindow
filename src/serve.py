@@ -156,8 +156,13 @@ def _compare_upstream(force=False):
                   "longitude": d.get("meta", {}).get("lon", 120.0961),
                   "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
                   "forecast_days": 16, "timezone": "Asia/Shanghai"}
-        r = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=30,
-                         headers={"User-Agent": "TeaWindow/1.0"})
+        r = None
+        for i in range(3):
+            r = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=30,
+                             headers={"User-Agent": "TeaWindow/1.0"})
+            if r.status_code != 429:
+                break
+            time.sleep(int(r.headers.get("Retry-After", 0)) or (6 * (i + 1)))
         r.raise_for_status()
         up = r.json()["daily"]
         upm = {day: {"tmax": up["temperature_2m_max"][i], "tmin": up["temperature_2m_min"][i],
@@ -177,6 +182,8 @@ def _compare_upstream(force=False):
                "note": "本地快照 vs 上游最新（同坐标）；差异大即决策级漂移，应视为可能过期。"}
     except Exception as e:  # noqa: BLE001
         res = {"ts": season.now().isoformat(timespec="seconds"), "error": repr(e)[:160]}
+        _COMPARE.update(ts=now - 1500, result=res)   # 失败时缩短缓存（约 5 分钟后再试）
+        return res
     _COMPARE.update(ts=now, result=res)
     return res
 
@@ -286,17 +293,20 @@ async def _guard_and_headers(request, call_next):
     return resp
 
 
-def _refresh(do_fetch=True):
+def _refresh(do_fetch=True, light=True):
     if not _refresh_lock.acquire(blocking=False):
         return {"status": "busy"}
     t0 = _time.time()
     _saved_argv = sys.argv
     sys.argv = ["pipeline"]   # 避免 uvicorn 命令行参数污染下游模块（如 fetch_weather 读 argv 当日期）
+    if light and do_fetch:
+        os.environ["TW_FETCH_FORECAST_ONLY"] = "1"   # 轻量：仅抓预报，避免上游限流
     try:
         import pipeline
-        pipeline.run(do_fetch=do_fetch, do_ndvi=do_fetch, do_figs=False, do_reports=False)
+        pipeline.run(do_fetch=do_fetch, do_ndvi=(do_fetch and not light), do_figs=False, do_reports=False)
         _advice_cache.clear()
-        _save_snapshot(fetched_at=season.now().strftime("%Y-%m-%d %H:%M:%S"), note="scheduled/manual refresh")
+        _save_snapshot(fetched_at=season.now().strftime("%Y-%m-%d %H:%M:%S"),
+                       note=("light refresh" if light else "full refresh"))
         store.set_refresh_state("ok", round(_time.time() - t0, 1),
                                 next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
         return {"status": "ok"}
@@ -306,6 +316,7 @@ def _refresh(do_fetch=True):
         raise
     finally:
         sys.argv = _saved_argv
+        os.environ.pop("TW_FETCH_FORECAST_ONLY", None)
         _refresh_lock.release()
 
 
@@ -795,18 +806,18 @@ def sensor_latest(request: Request, station_id: str = "", limit: int = 20):
 # ---- 物候/灾情上报（众包）已在上方 /api/report ----
 
 @app.post("/api/refresh")
-def refresh(request: Request, background: BackgroundTasks, fetch: bool = True):
+def refresh(request: Request, background: BackgroundTasks, fetch: bool = True, full: bool = False):
     _require_admin(request)
-    background.add_task(_refresh, fetch)
-    return {"status": "scheduled", "fetch": fetch}
+    background.add_task(_refresh, fetch, not full)
+    return {"status": "scheduled", "fetch": fetch, "light": not full}
 
 
 # ---- 定时任务：每日 06:00 + 每 3 小时刷新（若有 apscheduler）----
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     _sched = BackgroundScheduler(timezone="Asia/Shanghai")
-    _sched.add_job(lambda: _refresh(True), "cron", hour=6, minute=0, id="daily_refresh")
-    _sched.add_job(lambda: _refresh(True), "cron", hour="0,3,9,12,15,18,21", minute=20, id="refresh_3h",
+    _sched.add_job(lambda: _refresh(True, light=False), "cron", hour=6, minute=0, id="daily_refresh")
+    _sched.add_job(lambda: _refresh(True, light=True), "cron", hour="0,3,9,12,15,18,21", minute=20, id="refresh_3h",
                    replace_existing=True)
     # 预测验证归档（每 6 小时）
     _sched.add_job(lambda: _run_verify(60), "cron", hour="1,7,13,19", minute=35, id="verify_6h",
