@@ -374,6 +374,8 @@ _COMPOUND_CUES = [
     ("开采", "harvest_date"), ("防冻", "frost"), ("霜冻", "frost"), ("高温", "heat"),
     ("干旱", "drought"), ("浇水", "drought"), ("灌溉", "drought"), ("降雨", "rain"), ("排水", "rain"),
     ("该做什么", "decision"), ("做什么", "decision"), ("措施", "decision"), ("怎么办", "decision"), ("建议", "decision"),
+    ("最大降雨", "rain_max"), ("雨最大", "rain_max"), ("最大风险", "risk_today"),
+    ("更新时间", "ops"), ("刷新", "ops"),
 ]
 
 
@@ -383,6 +385,26 @@ def _compound_intents(q):
         if k in q and it not in out:
             out.append(it)
     return out
+
+
+def _ordered_tasks(q):
+    """按**出现顺序**抽取任务线索，返回 [(label, intent)]（去重）。"""
+    found = []
+    for k, it in _COMPOUND_CUES:
+        i = q.find(k)
+        if i >= 0:
+            found.append((i, k, it))
+    found.sort()
+    out, seen = [], set()
+    for _, k, it in found:
+        if it in seen:
+            continue
+        seen.add(it)
+        out.append((k, it))
+    return out
+
+
+_CANCEL = {"算了", "不问了", "不用了", "取消", "没事了", "不查了"}
 
 
 def _final_guard(q, txt):
@@ -446,6 +468,8 @@ def answer(question, context=None, history=None, state=None):
     r = _answer_impl(q, context, history, state)
     try:
         st = _extract_state(q, history, r, state)
+        if isinstance(r.get("state"), dict):
+            st.update(r["state"])
         from . import nlg
         ctx = nlg.classify_ctx(_load_data(), q)
         if st.get("format") == "json":
@@ -463,7 +487,7 @@ def answer(question, context=None, history=None, state=None):
             if tbl:
                 r["text"] = tbl
                 r["format"] = "table"
-        if isinstance(r.get("text"), str) and r.get("format") not in ("json", "table"):
+        if isinstance(r.get("text"), str) and r.get("format") not in ("json", "table") and r.get("intent") != "cancel":
             r["text"] = _final_guard(q, r["text"])
         r["state"] = st
     except Exception:  # noqa: BLE001
@@ -562,27 +586,34 @@ def _answer_impl(question, context=None, history=None, state=None):
         [s for s in strongs if s not in ("forecast_list", "rain_max", "compare", "greet")] + _compound_intents(stripped)
     ) if x not in ("oos", "unknown", "greet")]
     has_sep = any(sep in question for sep in ["、", ",", "，", "和", "同时", "以及", "还有"])
+    if q0 in _CANCEL:
+        return _reply("好的，已取消上一个问题。你可以继续问：今天风险 / 要不要防冻 / 先采哪块地 / 天气逐日。", intent="cancel")
     try:
         from . import nlg as _nl
         _field_query = bool(_nl._asks_fields(question) and
                             (_nl._parse_abs_date(question) or _nl._day_offset(question) or _nl._horizon(question)))
     except Exception:  # noqa: BLE001
         _field_query = False
-    if not is_follow and not _field_query and (len(comp) >= 3 or (len(comp) >= 2 and has_sep)):
+    tasks = _ordered_tasks(stripped)
+    if not is_follow and not _field_query and (len(tasks) >= 3 or (len(tasks) >= 2 and has_sep)):
         try:
             from . import nlg as _nlg
         except Exception:  # noqa: BLE001
             _nlg = None
         if _nlg is not None:
-            parts = []
-            for it in comp[:3]:
+            lines, used = [], []
+            for idx, (label, it) in enumerate(tasks[:4], 1):
                 rr = _nlg.compose(it, qt, _slots(qt, data), data)
-                parts.append(rr["text"])
-            return {"engine": "teawindow-own", "mode": "rules", "intent": "+".join(comp[:3]),
+                lines.append(f"{idx}) {label}：{rr['text']}")
+                used.append(it)
+            head = "按你的要求逐项回答：\n" + "\n".join(lines)
+            st_tasks = {k: it for k, it in tasks[:4]}
+            return {"engine": "teawindow-own", "mode": "rules", "intent": "+".join(used),
                     "confidence": 0.9, "backend": intent_backend(), "retrieval": retrieval_backend(),
                     "slots": {}, "detail": False, "follow_up": False,
-                    "text": _nlg.season.clean_text("；".join(parts)),
-                    "chain": ["复合问题拆解: " + "+".join(comp[:3])]}
+                    "text": _nlg.season.clean_text(head),
+                    "chain": ["任务规划(有序): " + "+".join(used)],
+                    "state": {"tasks": list(st_tasks.values())}}
 
     if strong:
         intent, conf = strong, 0.9            # 强关键词：置信度稳定（避免前后不一致）

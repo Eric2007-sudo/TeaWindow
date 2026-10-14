@@ -12,7 +12,8 @@ import urllib.error
 import urllib.request
 
 CRITICAL = ["/api/health", "/api/summary", "/api/days?scope=forecast", "/api/ask?q=%E4%BB%8A%E5%A4%A9%E6%9C%89%E9%A3%8E%E9%99%A9%E5%90%97",
-            "/api/realtime", "/api/updates", "/api/data/versions", "/api/forecast/verify", "/api/ready", "/api/alerts"]
+            "/api/realtime", "/api/updates", "/api/data/versions", "/api/forecast/verify", "/api/ready", "/api/alerts",
+            "/api/persistence", "/api/forecast/compare"]
 
 
 def _get(url, timeout=30):
@@ -71,6 +72,12 @@ def main():
         j = json.loads(_get(base + "/api/alerts")[1])
         return True, f"{j.get('count')} alerts"
     chk("alerts", alerts)
+
+    def persistence():
+        j = json.loads(_get(base + "/api/persistence")[1])
+        ext = j.get("external_configured")
+        return True, (f"db={j.get('db', {}).get('dialect')} external={ext} counts={j.get('counts')}")
+    chk("persistence", persistence)
 
     width = max(len(c[0]) for c in checks)
     passed = 0

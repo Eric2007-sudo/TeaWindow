@@ -29,3 +29,10 @@
 ## 五、仍未完成（真实数据/资源）
 - 题目要求的"运行闭环"仍需线上运行证据：持久卷/托管库挂载、`refresh.last_success` 非空、验证历史 ≥2 次、outcome 真实录入；
 - 现场传感器真值；设备签名+nonce；提前期验证更早年份与田间真值；物候超越固定日期基线。
+
+## 六、面向第六轮 P1/P2 的进一步优化
+- **任务规划器（有序）**：按线索**出现顺序**逐项回答并带编号清单（"先说最大风险，再说最大降雨日，最后更新时间与来源"→ 1)/2)/3)）；`state.tasks` 记录；`算了/不问了` → `cancel`。
+- **上游漂移 change-warning**：`GET /api/forecast/compare` 把本地快照与同坐标最新 Open-Meteo 逐日比对（缓存 30 分钟），差异 ≥3℃/≥5mm → 告警 `forecast_drift`。
+- **冷/热延迟分桶**：`/api/metrics` 增 `cold_p95_ms / hot_p95_ms / uptime_s`（启动 90s 内为冷）。
+- **持久化自检**：`GET /api/persistence`（公开只读）返回 db 方言、`external_configured`、各表计数与 `retention_hint`；已纳入 `deploy_check`。
+- 主页预报表排除过去日期；聊天欢迎态显示数据年龄与传感器状态。

@@ -136,6 +136,45 @@ def _cur_day(days):
 
 
 STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "60"))
+_COMPARE = {"ts": 0.0, "result": None}
+
+
+def _compare_upstream(force=False):
+    """把本地快照与同坐标最新 Open-Meteo 逐日预报比对（change-warning）。结果缓存 30 分钟。"""
+    now = _time.time()
+    if not force and _COMPARE["result"] is not None and (now - _COMPARE["ts"]) < 1800:
+        return _COMPARE["result"]
+    try:
+        import requests
+        d = _load()
+        fc = {x["date"]: x for x in d["days"] if x["source"] == "forecast"}
+        params = {"latitude": d.get("meta", {}).get("lat", 30.2139),
+                  "longitude": d.get("meta", {}).get("lon", 120.0961),
+                  "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
+                  "forecast_days": 16, "timezone": "Asia/Shanghai"}
+        r = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=30,
+                         headers={"User-Agent": "TeaWindow/1.0"})
+        r.raise_for_status()
+        up = r.json()["daily"]
+        upm = {day: {"tmax": up["temperature_2m_max"][i], "tmin": up["temperature_2m_min"][i],
+                     "precip": up["precipitation_sum"][i]} for i, day in enumerate(up["time"])}
+        dmax = dprecip = 0.0
+        n = 0
+        for day in set(fc) & set(upm):
+            a, b = fc[day], upm[day]
+            if a.get("tmax") is not None and b.get("tmax") is not None:
+                dmax = max(dmax, abs(a["tmax"] - b["tmax"]))
+            if a.get("precip") is not None and b.get("precip") is not None:
+                dprecip = max(dprecip, abs((a["precip"] or 0) - (b["precip"] or 0)))
+            n += 1
+        res = {"ts": season.now().isoformat(timespec="seconds"), "n_days": n,
+               "max_tmax_delta": round(dmax, 1), "max_precip_delta": round(dprecip, 1),
+               "changed": bool(dmax >= 3 or dprecip >= 5),
+               "note": "本地快照 vs 上游最新（同坐标）；差异大即决策级漂移，应视为可能过期。"}
+    except Exception as e:  # noqa: BLE001
+        res = {"ts": season.now().isoformat(timespec="seconds"), "error": repr(e)[:160]}
+    _COMPARE.update(ts=now, result=res)
+    return res
 
 
 def _lineage_ok():
@@ -220,8 +259,13 @@ async def _guard_and_headers(request, call_next):
         _METRICS["by_path"][p] = _METRICS["by_path"].get(p, 0) + 1
         if p.startswith("/api/"):
             _METRICS["lat"].append(dt)
-            if len(_METRICS["lat"]) > 500:
-                del _METRICS["lat"][:250]
+            if (_time.time() - _BOOT_TS) < COLD_WINDOW_S:
+                _METRICS["cold"].append(dt)
+            else:
+                _METRICS["hot"].append(dt)
+            for k in ("lat", "cold", "hot"):
+                if len(_METRICS[k]) > 500:
+                    del _METRICS[k][:250]
         if resp.status_code >= 500:
             _METRICS["errors"] += 1
     except Exception:  # noqa: BLE001
@@ -447,7 +491,10 @@ class OutcomeReq(BaseModel):
 
 
 # 运行指标（进程内，用于监控/告警）
-_METRICS = {"total": 0, "errors": 0, "by_path": {}, "latency_ms_sum": 0.0, "latency_max_ms": 0.0, "lat": []}
+_METRICS = {"total": 0, "errors": 0, "by_path": {}, "latency_ms_sum": 0.0, "latency_max_ms": 0.0,
+            "lat": [], "cold": [], "hot": []}
+_BOOT_TS = _time.time()
+COLD_WINDOW_S = int(os.environ.get("COLD_WINDOW_S", "90"))   # 启动后 N 秒内视为冷启动
 
 
 def _ask(q, engine, history=None, state=None):
@@ -832,27 +879,47 @@ def pilot_evaluate(request: Request):
 
 
 # ---- 运行指标 / 告警 / 实时更新 ----
+def _pct(arr, q):
+    a = sorted(arr)
+    if not a:
+        return None
+    i = min(len(a) - 1, int(round(q * (len(a) - 1))))
+    return round(a[i], 1)
+
+
 @app.get("/api/metrics")
 def metrics(request: Request):
     _require_admin(request)
-    lat = sorted(_METRICS["lat"])
-    def pct(q):
-        if not lat:
-            return None
-        i = min(len(lat) - 1, int(round(q * (len(lat) - 1))))
-        return round(lat[i], 1)
     avg = (_METRICS["latency_ms_sum"] / _METRICS["total"]) if _METRICS["total"] else 0
     fr = _freshness() if os.path.exists(DATA_JSON) else {}
     return {"requests": _METRICS["total"], "errors_5xx": _METRICS["errors"],
             "latency_avg_ms": round(avg, 1), "latency_max_ms": round(_METRICS["latency_max_ms"], 1),
-            "latency_p50_ms": pct(0.50), "latency_p95_ms": pct(0.95), "latency_p99_ms": pct(0.99),
-            "by_path": _METRICS["by_path"],
+            "latency_p50_ms": _pct(_METRICS["lat"], 0.50), "latency_p95_ms": _pct(_METRICS["lat"], 0.95),
+            "latency_p99_ms": _pct(_METRICS["lat"], 0.99),
+            "cold_p95_ms": _pct(_METRICS["cold"], 0.95), "hot_p95_ms": _pct(_METRICS["hot"], 0.95),
+            "uptime_s": round(_time.time() - _BOOT_TS, 1), "by_path": _METRICS["by_path"],
             "data_age_minutes": fr.get("age_minutes"), "data_stale": fr.get("stale"),
             "refresh": fr.get("refresh"), "build": fr.get("build"),
             "llm_usage": _llm_usage, "llm_daily_budget": LLM_DAILY_BUDGET,
             "sensor_count": store.sensor_count(), "device_active": store.device_count(),
             "versions": store.version_count(), "outcomes": store.outcome_count(),
+            "verifications": len(store.list_verifications(1)) if store.version_count() else 0,
             "db": store.db_info()}
+
+
+@app.get("/api/persistence")
+def persistence():
+    """持久化自检（公开只读，仅计数/后端类型）：跨重部署保留证据与所需配置。"""
+    info = store.db_info()
+    counts = {"versions": store.version_count(), "outcomes": store.outcome_count(),
+              "devices": store.device_count(active_only=False), "audit": len(store.list_audit(1)),
+              "verifications": len(store.list_verifications(1)) if True else 0,
+              "reports": len(store.list_reports(1)), "sensors": store.sensor_count()}
+    external = bool(os.environ.get("DATABASE_URL"))
+    return {"db": info, "counts": counts, "external_configured": external,
+            "uptime_s": round(_time.time() - _BOOT_TS, 1),
+            "retention_hint": ("已配置外部存储（DATABASE_URL）" if external else
+                               "未配置外部存储：Render 临时盘在重部署后可能清零；请挂载持久卷或托管数据库并设置 DATABASE_URL")}
 
 
 @app.get("/api/updates")
@@ -942,6 +1009,11 @@ def _collect_alerts():
             out.append({"level": "info", "code": "no_sensors", "msg": "尚未接入现场传感器"})
         if store.version_count() == 0:
             out.append({"level": "info", "code": "no_versions", "msg": "暂无数据版本快照"})
+        cmp = _compare_upstream()
+        if cmp.get("changed"):
+            out.append({"level": "warn", "code": "forecast_drift",
+                        "msg": f"上游预报与本地快照差异较大：ΔTmax {cmp.get('max_tmax_delta')}℃ / "
+                               f"Δ降水 {cmp.get('max_precip_delta')}mm（可能已过期）"})
     except Exception as e:  # noqa: BLE001
         out.append({"level": "error", "code": "alerts_error", "msg": repr(e)})
     return out
@@ -987,6 +1059,14 @@ def alerts():
 def alerts_test(request: Request):
     _require_admin(request)
     return _notify_alerts(force=True)
+
+
+@app.get("/api/forecast/compare")
+def forecast_compare(request: Request):
+    """change-warning：本地快照 vs 上游最新逐日预报的差异（缓存 30 分钟）。"""
+    ip = request.client.host if request.client else "global"
+    _rate_limit("cmp:" + ip, limit=int(os.environ.get("COMPARE_RPM", "20")))
+    return _compare_upstream()
 
 
 # 静态站点挂到最后，"/" 作为兜底（API 路由优先）

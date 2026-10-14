@@ -679,4 +679,37 @@ def test_outcome_negative_kind_and_ready_fields(monkeypatch):
     pj = c.get("/api/pilot/evaluate", headers={"X-Admin-Token": "adm"}).json()
     assert pj["status"] in ("pending", "ready")
     rd = c.get("/api/ready").json()
-    assert "lineage_ok" in rd and "refresh_ok" in rd and "warnings" in rd
+    assert "lineage_ok" in rd and "refresh_ok" in rd and "warnings" in rd and "data_fresh" in rd
+
+
+# ---------------- 任务规划器 / change-warning / 冷热延迟 / 持久化 ----------------
+def test_task_planner_ordered():
+    import qa.engine as e
+    r = e.answer("先说最大风险，再说最大降雨日，最后说明更新时间和来源")
+    assert r["text"].startswith("按你的要求逐项回答")
+    assert "1)" in r["text"] and "2)" in r["text"]
+    assert "+" in r["intent"]
+
+
+def test_cancel_command():
+    import qa.engine as e
+    r = e.answer("算了")
+    assert r["intent"] == "cancel" and "取消" in r["text"]
+
+
+def test_forecast_compare_endpoint():
+    c = _client()
+    r = c.get("/api/forecast/compare")
+    assert r.status_code == 200
+    j = r.json()
+    assert ("changed" in j) or ("error" in j)
+
+
+def test_persistence_and_cold_hot_metrics(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    p = c.get("/api/persistence", headers={"X-Admin-Token": "adm"}).json()
+    assert "db" in p and "counts" in p and "retention_hint" in p
+    m = c.get("/api/metrics", headers={"X-Admin-Token": "adm"}).json()
+    assert "cold_p95_ms" in m and "hot_p95_ms" in m and "uptime_s" in m
