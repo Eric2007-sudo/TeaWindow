@@ -56,3 +56,16 @@
 - `src/deploy_check.py`：部署后校验 health/ready(含 build SHA)/OpenAPI 路由数 ≥20/10 个核心接口/alerts，输出 PASS/FAIL 与退出码；`.github/workflows/deploy_check.yml` 每 3 小时自检。
 - 数据血缘增强：`data/processed/fetch_meta.json`（上游 URL/参数/**原始响应 SHA-256**/抓取时间）；版本表增 `upstream_url/params/raw_sha256_full`。
 - 测试 81 → **83**。
+
+## 十、多年春采季验证 + GPU 训练（本轮）
+### 10.1 多年春采季霜冻验证（权威在线）
+- `src/forecast_verify.py` 扩展：**B) 多年春采季（2–4 月）**，Historical Forecast 归档 vs ERA5，给出逐年与汇总指标、bootstrap 95% CI、持续法与全报警基线。
+- 结果（2022–2025，357 天）：**POD 0.709 / FAR 0.0 / CSI 0.709**，Tmin MAE **1.32**（CI [1.21,1.43]），优于持续法 MAE 2.08 与全报警基线（CSI≈0.29）。
+- 诚实局限：归档预报提前期≈0–1 天；ERA5 非田间真值；Tmin 偏暖 +1.25℃ 导致约 29% 霜冻日漏报。
+
+### 10.2 GPU 训练（易混样本增广）— 负结果
+- 语料新增 **易混/硬样本（CONFUSE，约 90 条）** + 繁简/中英/口语变体，训练量 2401 → **2716**。
+- 重训教师 `chinese-roberta-wwm-ext`：eval 93.8% / 挑战 95.6%（与上版持平）。
+- 蒸馏学生 `rbt3`：eval **91.1%** / 挑战 86.7%，**低于**在线部署版（94.5% / 93.3%）。
+- 嵌入（BGE）重训：检索 0.767 ≈ 现版 0.774，无提升。
+- 决策：**保留在线部署模型**（`qa_intent_rbt3_oos` + `qa_embedder_onnx`）；本轮训练记为负结果，语料与脚本保留可复现。

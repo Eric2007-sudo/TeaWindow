@@ -182,7 +182,39 @@ INTENTS = {
     ],
 }
 
-# 独立挑战集：手工新写、不出现在种子中（用于测泛化/过拟合；不参与训练）
+# 易混/硬样本（追加到训练集，不进入评测以保证评测干净）
+CONFUSE = [
+    # frost vs rain / 湿冷
+    ("湿冷天会不会冻坏茶芽", "frost"), ("下雨又降温会不会打霜", "frost"), ("冷雨天后半夜会不会结霜", "frost"),
+    ("露水会不会变成霜", "frost"), ("阴雨天低温伤不伤芽", "frost"),
+    # rain vs frost
+    ("连阴雨低温对芽有影响吗", "rain"), ("湿冷天叶片会不会沤", "rain"), ("冷雨天要不要防涝", "rain"),
+    ("雨夹雪要不要清沟", "rain"), ("湿害和冻害哪个更急", "rain"),
+    # heat vs drought
+    ("又热又干先防哪个", "heat"), ("暴晒缺水顶叶会不会焦", "heat"), ("高温少雨要不要拉网", "heat"),
+    ("大热天土壤干怎么处理", "drought"), ("高温持续要不要浇透", "drought"),
+    # drought
+    ("一直不下雨要不要抽水", "drought"), ("土壤发干要不要测墒", "drought"),
+    # decision vs schedule
+    ("今天该采还是排明天", "decision"), ("要不要等一天再动手", "decision"), ("抢在今天还是明天采划算", "decision"),
+    ("先排哪片明天再采哪片", "schedule"), ("采茶队怎么分片", "schedule"),
+    # harvest_date vs pick_window
+    ("开采日大概几号", "harvest_date"), ("头采日子定了没", "harvest_date"), ("哪天最适合摘头茬", "pick_window"),
+    ("明前窗口是哪几天", "pick_window"),
+    # value vs insurance
+    ("保费和减损哪个更划算", "value"), ("理赔能挽回多少损失", "insurance"), ("这套系统一年省的钱够不够保费", "value"),
+    # model vs data_source
+    ("你们模型和数据的出处", "data_source"), ("准确率和数据来源都要看", "model"),
+    # plot vs risk
+    ("哪块坡最怕冻", "plot"), ("地块之间风险差多少", "plot"),
+    # 繁简/中英/错字变体（引擎会归一，训练覆盖归一后表达）
+    ("未來兩天會不會有霜冻", "frost"), ("明天 frost risk 高不高", "frost"),
+    ("需要 irrigation 吗", "drought"), ("rain 会不会很大", "rain"),
+    ("今夭茶园咋样", "risk_today"), ("明夭有霜冻吗", "frost"),
+    ("採摘窗口怎么样", "pick_window"), ("先採哪块地", "schedule"),
+    # 口语/省略
+    ("冻不冻", "frost"), ("干不干", "drought"), ("热不热", "heat"), ("下不下雨", "rain"),
+]
 CHALLENGE = [
     ("周末要不要提前把嫩芽采了", "decision"),
     ("这几天的低温会不会把芽尖打坏", "frost"),
@@ -282,6 +314,9 @@ def main():
         n_ev = max(5, int(round(len(items) * 0.30)))   # 分层：每类 ≥5 条评测
         ev += [{"text": q, "intent": intent} for q in items[:n_ev]]
         train += [{"text": q, "intent": intent} for q in items[n_ev:]]
+
+    # 易混/硬样本并入训练（不进入评测，保证评测干净）
+    train += [{"text": t, "intent": i} for t, i in CONFUSE]
 
     # 增广（仅训练集）
     aug = []
