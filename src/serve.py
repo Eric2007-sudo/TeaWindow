@@ -144,17 +144,18 @@ STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "60"))
 _COMPARE = {"ts": 0.0, "result": None}
 
 
-def _compare_upstream(force=False):
-    """把本地快照与同坐标最新 Open-Meteo 逐日预报比对（change-warning）。结果缓存 30 分钟。"""
-    now = _time.time()
-    if not force and _COMPARE["result"] is not None and (now - _COMPARE["ts"]) < 1800:
-        return _COMPARE["result"]
-    try:
-        import requests
-        d = _load()
-        fc = {x["date"]: x for x in d["days"] if x["source"] == "forecast"}
-        params = {"latitude": d.get("meta", {}).get("lat", 30.2139),
-                  "longitude": d.get("meta", {}).get("lon", 120.0961),
+def _upstream_daily():
+    """取上游最新逐日预报（tmax/tmin/precip），用于漂移比对。
+    优先与主源一致；Open-Meteo 失败（如免费档 429）时回退 MET Norway。返回 (map, source)。"""
+    import requests
+    d = _load()
+    lat = d.get("meta", {}).get("lat", 30.2139)
+    lon = d.get("meta", {}).get("lon", 120.0961)
+    import fetch_weather
+    ua = getattr(fetch_weather, "UA", "TeaWindow/1.0 (contact: 2302372846@qq.com)")
+
+    def from_om():
+        params = {"latitude": lat, "longitude": lon,
                   "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
                   "forecast_days": 16, "timezone": "Asia/Shanghai"}
         url = "https://api.open-meteo.com/v1/forecast"
@@ -164,15 +165,41 @@ def _compare_upstream(force=False):
             params["apikey"] = _omk
         r = None
         for i in range(3):
-            r = requests.get(url, params=params, timeout=30,
-                             headers={"User-Agent": "TeaWindow/1.0 (AI4Climate Meijiawu tea-garden; contact: 2302372846@qq.com)"})
+            r = requests.get(url, params=params, timeout=30, headers={"User-Agent": ua})
             if r.status_code != 429:
                 break
             _time.sleep(int(r.headers.get("Retry-After", 0)) or (6 * (i + 1)))
         r.raise_for_status()
         up = r.json()["daily"]
-        upm = {day: {"tmax": up["temperature_2m_max"][i], "tmin": up["temperature_2m_min"][i],
-                     "precip": up["precipitation_sum"][i]} for i, day in enumerate(up["time"])}
+        return {day: {"tmax": up["temperature_2m_max"][i], "tmin": up["temperature_2m_min"][i],
+                      "precip": up["precipitation_sum"][i]} for i, day in enumerate(up["time"])}
+
+    def from_metno():
+        up = fetch_weather.fetch_forecast_metno(16)["daily"]
+        return {day: {"tmax": up["temperature_2m_max"][i], "tmin": up["temperature_2m_min"][i],
+                      "precip": up["precipitation_sum"][i]} for i, day in enumerate(up["time"])}
+
+    primary = os.environ.get("FORECAST_SOURCE", "auto")
+    if primary == "metno":
+        try:
+            return from_metno(), "met.no"
+        except Exception:  # noqa: BLE001
+            return from_om(), "open-meteo"
+    try:
+        return from_om(), "open-meteo"
+    except Exception:  # noqa: BLE001
+        return from_metno(), "met.no"
+
+
+def _compare_upstream(force=False):
+    """把本地快照与上游最新逐日预报比对（change-warning）。结果缓存 30 分钟。"""
+    now = _time.time()
+    if not force and _COMPARE["result"] is not None and (now - _COMPARE["ts"]) < 1800:
+        return _COMPARE["result"]
+    try:
+        d = _load()
+        fc = {x["date"]: x for x in d["days"] if x["source"] == "forecast"}
+        upm, up_src = _upstream_daily()
         dmax = dprecip = 0.0
         n = 0
         for day in set(fc) & set(upm):
@@ -182,7 +209,7 @@ def _compare_upstream(force=False):
             if a.get("precip") is not None and b.get("precip") is not None:
                 dprecip = max(dprecip, abs((a["precip"] or 0) - (b["precip"] or 0)))
             n += 1
-        res = {"ts": season.now().isoformat(timespec="seconds"), "n_days": n,
+        res = {"ts": season.now().isoformat(timespec="seconds"), "n_days": n, "upstream": up_src,
                "max_tmax_delta": round(dmax, 1), "max_precip_delta": round(dprecip, 1),
                "changed": bool(dmax >= 3 or dprecip >= 5),
                "note": "本地快照 vs 上游最新（同坐标）；差异大即决策级漂移，应视为可能过期。"}
