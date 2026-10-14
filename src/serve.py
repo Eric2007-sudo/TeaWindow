@@ -1049,8 +1049,9 @@ def ready():
     lin = _lineage_ok()
     rs = store.get_refresh_state()
     refresh_ok = rs.get("status") not in ("unknown", "error")
-    cmp = _compare_upstream()
-    compare_ok = ("error" not in cmp) and (cmp.get("changed") is not True)
+    ran = bool(_COMPARE.get("result"))
+    cmp = _COMPARE["result"] if ran else {"cached": False}
+    compare_ok = ran and ("error" not in cmp) and (cmp.get("changed") is not True)
     service_ready = bool(has_data and not missing)
     decision_ready = bool(service_ready and (fr.get("stale") is not True) and lin and refresh_ok and compare_ok)
     warnings = []
@@ -1063,7 +1064,9 @@ def ready():
         warnings.append("no_lineage")
     if not refresh_ok:
         warnings.append("refresh_" + str(rs.get("status")))
-    if "error" in cmp:
+    if not ran:
+        warnings.append("compare_not_run")
+    elif "error" in cmp:
         warnings.append("compare_failed")
     elif cmp.get("changed"):
         warnings.append("forecast_drift")
@@ -1096,11 +1099,14 @@ def _collect_alerts():
             out.append({"level": "info", "code": "no_sensors", "msg": "尚未接入现场传感器"})
         if store.version_count() == 0:
             out.append({"level": "info", "code": "no_versions", "msg": "暂无数据版本快照"})
-        cmp = _compare_upstream()
+        cmp = _COMPARE.get("result") or {}
         if cmp.get("changed"):
             out.append({"level": "warn", "code": "forecast_drift",
                         "msg": f"上游预报与本地快照差异较大：ΔTmax {cmp.get('max_tmax_delta')}℃ / "
                                f"Δ降水 {cmp.get('max_precip_delta')}mm（可能已过期）"})
+        elif "error" in cmp:
+            out.append({"level": "info", "code": "compare_failed",
+                        "msg": "上游漂移检测暂不可用（如限流）；建议手动核验最新预报"})
     except Exception as e:  # noqa: BLE001
         out.append({"level": "error", "code": "alerts_error", "msg": repr(e)})
     return out
