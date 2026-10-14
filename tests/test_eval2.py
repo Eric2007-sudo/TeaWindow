@@ -591,6 +591,40 @@ def test_alerts_test_endpoint(monkeypatch):
     assert r.status_code == 200 and "notified" in r.json()
 
 
+def test_push_webhook_kinds(monkeypatch):
+    import serve, requests
+    captured = {}
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            return {"errcode": 0}
+
+    def fake_post(url, **kw):
+        captured["url"] = url
+        captured["body"] = kw.get("json")
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(serve, "ALERT_WEBHOOK_URL", "https://example.test/hook")
+    payload = {"site": "梅家坞 TeaWindow", "server_time": "t",
+               "new": ["data_stale"], "active": ["data_stale"], "alerts": []}
+    monkeypatch.setenv("ALERT_WEBHOOK_KIND", "slack")
+    assert serve._push_webhook(payload)["sent"] and "text" in captured["body"]
+    monkeypatch.setenv("ALERT_WEBHOOK_KIND", "feishu")
+    serve._push_webhook(payload)
+    assert captured["body"]["msg_type"] == "text"
+    monkeypatch.setenv("ALERT_WEBHOOK_KIND", "dingtalk")
+    monkeypatch.setenv("ALERT_WEBHOOK_SECRET", "SEC")
+    assert serve._push_webhook(payload)["sent"]
+    assert "timestamp=" in captured["url"] and "sign=" in captured["url"]
+    monkeypatch.delenv("ALERT_WEBHOOK_KIND", raising=False)
+    monkeypatch.delenv("ALERT_WEBHOOK_SECRET", raising=False)
+    serve._push_webhook(payload)
+    assert captured["body"] == payload   # generic：原样 JSON
+
+
 # ---------------- 存储适配（DATABASE_URL / Postgres 翻译） ----------------
 def test_store_db_info():
     import store

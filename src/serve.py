@@ -1176,13 +1176,53 @@ def _collect_alerts():
     return out
 
 
+def _alert_text(payload):
+    site = payload.get("site", "TeaWindow")
+    t = payload.get("server_time", "")
+    new = payload.get("new") or []
+    active = payload.get("active") or []
+    lines = [f"【{site}】告警通知 {t}".rstrip(),
+             "新增: " + (", ".join(new) if new else "无"),
+             "当前: " + (", ".join(active) if active else "无")]
+    for a in payload.get("alerts") or []:
+        if a.get("level") in ("warn", "error"):
+            lines.append(f"- [{a.get('level')}] {a.get('code')}: {a.get('msg', '')}")
+    return "\n".join(lines)
+
+
 def _push_webhook(payload):
+    """按渠道格式化并推送。ALERT_WEBHOOK_KIND: generic(默认)/slack/feishu/dingtalk。"""
     if not ALERT_WEBHOOK_URL:
         return {"sent": False, "reason": "ALERT_WEBHOOK_URL 未配置"}
+    kind = (os.environ.get("ALERT_WEBHOOK_KIND") or "generic").lower()
     try:
         import requests
-        r = requests.post(ALERT_WEBHOOK_URL, json=payload, timeout=15)
-        return {"sent": r.status_code < 400, "status": r.status_code}
+        url, body = ALERT_WEBHOOK_URL, payload
+        if kind == "slack":
+            body = {"text": _alert_text(payload)}
+        elif kind == "feishu":
+            body = {"msg_type": "text", "content": {"text": _alert_text(payload)}}
+        elif kind == "dingtalk":
+            body = {"msgtype": "text", "text": {"content": _alert_text(payload)}}
+            secret = os.environ.get("ALERT_WEBHOOK_SECRET", "")
+            if secret:  # 钉钉加签
+                import base64, hashlib, hmac, time as _t, urllib.parse
+                ts = str(round(_t.time() * 1000))
+                string_to_sign = f"{ts}\n{secret}"
+                sign = urllib.parse.quote_plus(base64.b64encode(
+                    hmac.new(secret.encode(), string_to_sign.encode(), hashlib.sha256).digest()))
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}timestamp={ts}&sign={sign}"
+        r = requests.post(url, json=body, timeout=15)
+        ok = r.status_code < 400
+        detail = str(r.status_code)
+        try:  # 钉钉/飞书 用 HTTP 200 + errcode 表达失败
+            jj = r.json()
+            if isinstance(jj, dict) and jj.get("errcode") not in (None, 0):
+                ok, detail = False, f"{r.status_code} errcode={jj.get('errcode')} {jj.get('errmsg', '')}"
+        except Exception:  # noqa: BLE001
+            pass
+        return {"sent": ok, "status": r.status_code, "kind": kind, "detail": detail}
     except Exception as e:  # noqa: BLE001
         return {"sent": False, "reason": repr(e)}
 
@@ -1199,7 +1239,7 @@ def _notify_alerts(force=False):
                              "alerts": cur})
         store.set_alerts_state(codes)
         store.add_alert_delivery(sorted(codes - prev), bool(res.get("sent")),
-                                 str(res.get("reason") or res.get("status") or ""))
+                                 str(res.get("reason") or res.get("detail") or res.get("status") or ""))
         return {"notified": True, "new": sorted(codes - prev), **res}
     store.set_alerts_state(codes)
     return {"notified": False, "reason": "no_change", "active": sorted(codes)}
@@ -1211,6 +1251,7 @@ def alerts():
     cur = _collect_alerts()
     return {"alerts": cur, "count": len(cur), "server_time": season.now().isoformat(timespec="seconds"),
             "webhook_configured": bool(ALERT_WEBHOOK_URL),
+            "webhook_kind": (os.environ.get("ALERT_WEBHOOK_KIND") or "generic").lower(),
             "notified": store.get_alerts_state(),
             "last_delivery": store.last_alert_delivery()}
 
