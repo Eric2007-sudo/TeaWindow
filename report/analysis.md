@@ -33,7 +33,7 @@
 | 数据类型 | 来源 | 说明 |
 |---|---|---|
 | 逐日气象（历史 2015–2026，4301 天） | Open-Meteo Archive（ERA5） | Tmax/Tmin/Tmean、降水、相对湿度、ET0、短波辐射、日照、风速、土壤湿度 |
-| 16 天逐日预报 | Open-Meteo Forecast | 同字段 |
+| 16 天逐日预报 | MET Norway Locationforecast（首选）/ Open-Meteo Forecast（回退） | 核心字段同历史；MET Norway 无 ET0/辐射/土壤湿度，缺失时以模式字段或空值处理 |
 | 植被活力 | NASA GIBS `MODIS_Terra_NDVI_8Day` | 通过官方图例把颜色**近似反演**为 NDVI；GIBS 缓存自 2025-02 起 |
 | 高分辨率能力证明 | Element84 Earth Search `sentinel-2-l2a` | 列出 AOI 内真实 S2 场景（云量筛查） |
 

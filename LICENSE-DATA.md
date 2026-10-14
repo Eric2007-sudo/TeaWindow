@@ -9,7 +9,8 @@
 **代码**（`src/`、`web/*.js`、`*.ps1` 等）采用 **MIT License**，见 `LICENSE`。
 
 ## 第三方数据来源与许可
-- 气象：Open-Meteo（CC BY 4.0，https://open-meteo.com/）
+- 气象（历史）：Open-Meteo（ERA5，CC BY 4.0，https://open-meteo.com/）
+- 气象（预报）：MET Norway Locationforecast（NLOD / CC BY 4.0，https://api.met.no/ ；请求带可识别 User-Agent 与联系方式）
 - 台站观测：Meteostat（https://meteostat.net/ ，数据来自公开气象机构）
 - 遥感：NASA GIBS（MODIS NDVI，公有领域）；Copernicus Sentinel-2（ESA，CC BY-SA 3.0 IGO）
 - 地形高程：Open-Meteo Elevation（Copernicus DEM）

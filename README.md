@@ -22,7 +22,7 @@ TeaWindow 用一个**可运行、可验证**的离线原型，回答茶农每天
 ## 2. 方案（气象指标 + 机器学习 + 遥感 + LLM）
 
 ```
-Open-Meteo 气象(历史+预报)          NASA GIBS / Sentinel-2 遥感
+Open-Meteo ERA5 历史 + MET Norway 预报      NASA GIBS / Sentinel-2 遥感
         │                                   │
         ▼                                   ▼
   农业气象指标引擎                    植被活力(NDVI 近似)
@@ -48,7 +48,7 @@ TeaWindow/
 ├─ README.md · PLAN.md · LICENSE(MIT) · LICENSE-DATA(CC BY 4.0) · CITATION.cff
 ├─ requirements.txt · .env.example · run_all.ps1
 ├─ src/
-│  ├─ fetch_weather.py   # 抓取 Open-Meteo 历史(2015+)+16天预报
+│  ├─ fetch_weather.py   # 抓取历史(Open-Meteo ERA5 2015+)+16天预报(MET Norway 首选，Open-Meteo 回退)
 │  ├─ fetch_station.py   # Meteostat 杭州站真实观测（一手观测）+ 交叉验证
 │  ├─ station_correct.py # 用台站观测对 ERA5 做逐月偏差订正
 │  ├─ sensor_ingest.py   # 接入外部/自建传感器 CSV → 计算指标
@@ -121,9 +121,13 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 
 ## 6. 数据来源（全部公开、免密钥）
 
+> 预报主源为 **MET Norway**（`FORECAST_SOURCE=metno`），Open-Meteo 仅用于历史归档与回退；
+> 免费档按出口 IP 限流，故主源避开 Open-Meteo 预报端点，并对抓取失败做本地缓存回退。
+
 | 用途 | 来源 |
 |---|---|
-| 气象（历史+预报） | Open-Meteo（ERA5 再分析 + 预报） |
+| 气象（历史） | Open-Meteo（ERA5 再分析，免密钥） |
+| 气象（预报） | MET Norway Locationforecast（首选，免密钥）→ Open-Meteo Forecast（回退） |
 | **真实台站观测（一手）** | Meteostat 杭州站 WMO 58457（逐日观测） |
 | 植被活力 | NASA GIBS `MODIS_Terra_NDVI_8Day`（颜色近似反演） |
 | 高分辨率能力证明 | Element84 Earth Search `sentinel-2-l2a`（STAC 场景清单） |
@@ -142,7 +146,7 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 
 - **自播放演示页**（录屏用）：`web/demo.html`（自动巡览 + 字幕，空格暂停，←/→ 切换）
 - **一键打包**：`dist/TeaWindow_v1.3.zip`；**GitHub Release**：https://github.com/Eric2007-sudo/TeaWindow/releases/tag/v1.3
-- **测试与 CI**：`tests/`（pytest，**111 passed**）、`.github/workflows/test.yml`
+- **测试与 CI**：`tests/`（pytest，**115 passed**）、`.github/workflows/test.yml`
 - **发布一致性自检**：`src/deploy_check.py`、`.github/workflows/deploy_check.yml`、`/api/ready`、`/api/alerts`
 - **持久化（已接入）**：Render Postgres + `DATABASE_URL`；`/api/persistence`；`src/persistence_check.py`（跨重部署保留验收 PASS）
 - **外部定时器**：`.github/workflows/verify.yml`（每 6h 触发验证刷新）；`.github/workflows/refresh.yml`（每日刷新）
@@ -150,6 +154,8 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
   （统一季节策略 + 北京时间、日期槽位/目标日一致、history 强类型、输出完整性、灌溉先测墒、数据权威深答）
 - **数据治理与接口**：`submit/16_数据治理与接口.md`（提前期真实误差 `/api/forecast/verify`、数据版本 `/api/data/versions`、设备凭证/审计、田间结果 `/api/outcome`、`/api/metrics`、`/api/updates`）
 - **提前期误差报告**：`report/forecast_verify.md`（Open-Meteo Previous Runs vs ERA5，1/3/7 天）
+- **当前状态评估（自评）**：`report/round15_live_assessment.md`（对照第七轮验收；刷新闭环/decision_ready/钉钉送达/JSON 跨轮/否定改口已闭环）
+- **告警渠道**：`ALERT_WEBHOOK_URL` + `ALERT_WEBHOOK_KIND`（generic/slack/feishu/**dingtalk**，支持加签 `ALERT_WEBHOOK_SECRET`）
 - **外部定时刷新**：`.github/workflows/refresh.yml`（每日 06:00 CST 调用线上 `/api/refresh`）
 - **许可证**：代码 **MIT**（`LICENSE`）· 数据与文档 **CC BY 4.0**（`LICENSE-DATA.md`）
 - **引用**：见 `CITATION.cff`
