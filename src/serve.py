@@ -902,15 +902,25 @@ def ready():
     lin = _lineage_ok()
     rs = store.get_refresh_state()
     refresh_ok = rs.get("status") not in ("unknown", "error")
-    ok = has_data and not missing and (fr.get("stale") is not True) and lin
+    # 部署就绪：路由完整 + 数据可用 + 血缘齐备 + 刷新状态已知（新鲜度单独用 data_fresh/warnings 表达）
+    ok = has_data and not missing and lin and refresh_ok
+    warnings = []
+    if not has_data:
+        warnings.append("no_data")
+    warnings += [f"missing:{m}" for m in missing]
+    if fr.get("stale"):
+        warnings.append("stale")
+    if not lin:
+        warnings.append("no_lineage")
+    if not refresh_ok:
+        warnings.append("refresh_unknown")
     return {"ready": ok, "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
             "route_count": len(routes), "critical_total": len(CRITICAL_ROUTES),
             "missing_critical": missing, "data_ready": has_data,
             "age_minutes": fr.get("age_minutes"), "stale": fr.get("stale"),
+            "data_fresh": fr.get("stale") is not True,
             "lineage_ok": lin, "refresh_ok": refresh_ok, "refresh": rs,
-            "warnings": ([not has_data and "no_data"] + [f"missing:{m}" for m in missing]
-                         + (["stale"] if fr.get("stale") else []) + ([] if lin else ["no_lineage"])
-                         + ([] if refresh_ok else ["refresh_unknown"])),
+            "warnings": warnings,
             "server_time": season.now().isoformat(timespec="seconds")}
 
 
