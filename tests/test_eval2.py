@@ -175,7 +175,8 @@ def test_onnx_backend_labels_match_engine_classes():
         pytest.skip("ONNX 后端未启用")
     onnx_classes = set(intent_onnx._classes)  # noqa: SLF001
     numpy_classes = set(e._load_model()["classes"])
-    assert onnx_classes == numpy_classes
+    # ONNX 为权威后端；numpy 仅为无 onnxruntime 时的兜底，允许其为 ONNX 类别的子集
+    assert numpy_classes <= onnx_classes
 
 
 def test_engine_falls_back_to_numpy(monkeypatch):
@@ -727,6 +728,19 @@ def test_compound_tasks_dedup_and_task_ref():
     r2 = e.answer("第二项展开说明", None,
                   [{"role": "user", "content": q}, {"role": "assistant", "content": r["text"]}], r["state"])
     assert r2["intent"] == "task_ref" and "第 2 项" in r2["text"] and "最大降雨" in r2["text"]
+
+
+def test_natural_multiclause_decompose():
+    import qa.engine as e
+    r = e.answer("梅家坞这片山头会不会受冻，冻掉一茬还能不能冒出来，保险这个能不能报")
+    assert "insurance" in r["intent"] and "frost" in r["intent"]      # 自然口语多维 → 分项
+    assert r["text"].startswith("按你的要求逐项回答")
+
+
+def test_yaobuyao_is_not_cancel():
+    import qa.engine as e
+    r = e.answer("哪块地最容易冻，要不要防冻，保险能赔多少")
+    assert "frost" in r["intent"] and "insurance" in r["intent"]      # "要不要防冻" 不应被当作"取消防冻"
 
 
 def test_english_halflanguage_rejected():

@@ -115,13 +115,20 @@ def _normalize(q):
 
 STRONG = [
     ("寒潮", "frost"), ("冷空气", "frost"), ("霜冻", "frost"), ("倒春寒", "frost"), ("防冻", "frost"), ("降温", "frost"),
+    ("受冻", "frost"), ("冻蔫", "frost"), ("冻坏", "frost"), ("冻掉", "frost"), ("冻伤", "frost"),
+    ("打霜", "frost"), ("下霜", "frost"), ("低温", "frost"), ("结冰", "frost"),
     ("高温", "heat"), ("遮阳", "heat"), ("热害", "heat"), ("灼伤", "heat"),
+    ("晒焦", "heat"), ("焦边", "heat"), ("焦掉", "heat"), ("日头毒", "heat"), ("太阳毒", "heat"), ("晒伤", "heat"),
     ("干旱", "drought"), ("灌溉", "drought"), ("浇水", "drought"), ("墒", "drought"),
+    ("灌水", "drought"), ("抽水", "drought"), ("缺水", "drought"), ("干裂", "drought"),
     ("连阴雨", "rain"), ("排水", "rain"), ("防涝", "rain"), ("降雨", "rain"), ("雨水", "rain"),
+    ("摊晾", "rain"), ("青叶", "rain"),
     ("保险", "insurance"), ("保费", "insurance"), ("理赔", "insurance"), ("赔付", "insurance"),
     ("开采期", "harvest_date"), ("开采日", "harvest_date"), ("什么时候开采", "harvest_date"), ("上市", "harvest_date"),
+    ("发芽", "harvest_date"), ("抽芽", "harvest_date"), ("出芽", "harvest_date"), ("早发", "harvest_date"), ("开摘", "harvest_date"),
     ("先采", "schedule"), ("采哪", "schedule"), ("排班", "schedule"), ("安排采", "schedule"),
     ("抢采", "decision"),
+    ("气象台", "data_source"),
     # 最大雨日 / 对比（优先于逐日清单）
     ("雨最大", "rain_max"), ("最大雨", "rain_max"), ("哪天雨", "rain_max"), ("降雨最大", "rain_max"),
     ("哪个风险", "compare"), ("哪个更高", "compare"), ("哪个高", "compare"), ("风险更高", "compare"),
@@ -408,6 +415,41 @@ def _ordered_tasks(q):
     return out
 
 
+_CLAUSE_SPLIT = None
+
+
+def _topic_of(clause):
+    """给一个子句判定主题：强关键词 → 复合线索 → 分类器（高置信）。"""
+    for k, it in STRONG:
+        if k in clause:
+            return it
+    for k, it in _COMPOUND_CUES:
+        if k in clause:
+            return it
+    try:
+        it, conf = classify(clause)
+        if conf >= 0.5 and it not in ("oos", "greet"):
+            return it
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _clause_tasks(q):
+    """自然口语的多维提问：按子句切分，逐一判主题，得到有序任务清单（去重）。"""
+    parts = re.split(r"[，,；;。!！?？]+|还有|还有呢|以及|顺便|另外|再有|然后再|再说|同时|并且", q)
+    out, seen = [], set()
+    for p in parts:
+        p = (p or "").strip()
+        if len(p) < 2:
+            continue
+        it = _topic_of(p)
+        if it and it not in seen:
+            seen.add(it)
+            out.append((p[:12], it))
+    return out
+
+
 _CANCEL = {"算了", "不问了", "不用了", "取消", "没事了", "不查了"}
 
 
@@ -670,6 +712,9 @@ def _answer_impl(question, context=None, history=None, state=None):
     # 纯相对日期追问（如"大后天呢"）无强/关词时，强制按日回答
     if _off_q is not None and not strong and not kw:
         intent, conf = "risk_today", 0.9
+    # 日期承接追问（前一天/下一天/那一天/它…）无明确主题时，也强制按日回答，避免被判成无关意图
+    if (mshift is not None or (pronoun and not prev)) and not strong and not kw:
+        intent, conf = "risk_today", 0.85
 
     # 通用复合拆解：主题强意图 + 复合线索（风险/来源/模型/动作/具体灾害）
     comp = [x for x in dict.fromkeys(
@@ -679,10 +724,12 @@ def _answer_impl(question, context=None, history=None, state=None):
     if q0 in _CANCEL:
         return _reply("好的，已取消上一个问题。你可以继续问：今天风险 / 要不要防冻 / 先采哪块地 / 天气逐日。", intent="cancel")
     tasks = _ordered_tasks(stripped)
+    if len(tasks) < 2:                       # 自然口语多维提问：按子句规划
+        tasks = _clause_tasks(stripped)
     # 取消/改口（最后指令优先）：REMOVE 被取消任务，ADD 新任务
     try:
         removed = []
-        for m in re.finditer(r"(?:取消|不要|不查|去掉|不再|算了)\s*(?:的)?\s*(霜冻|倒春寒|高温|干旱|灌溉|浇水|排水|降雨|雨水|防冻|保险|风险|开采|排班|采摘)", stripped):
+        for m in re.finditer(r"(?:取消|(?<!要)不要|不查|去掉|不再|算了)\s*(?:的)?\s*(霜冻|倒春寒|高温|干旱|灌溉|浇水|排水|降雨|雨水|防冻|保险|风险|开采|排班|采摘)", stripped):
             kw = m.group(1)
             for k, it in _COMPOUND_CUES:
                 if k == kw and it not in removed:
