@@ -696,6 +696,39 @@ def test_markdown_table_format():
     assert r.get("format") == "table" and r["text"].lstrip().startswith("|")
 
 
+def test_table_compare_columns_and_days():
+    import qa.engine as e
+    r = e.answer("用 Markdown 表格比较 2026-10-20 和下一天，列：日期、最低温、降雨、风险、行动")
+    assert r.get("format") == "table"
+    lines = [l for l in r["text"].splitlines() if l.startswith("|")]
+    assert "日期" in lines[0] and "行动" in lines[0]
+    assert any("2026-10-20" in l for l in lines) and any("2026-10-21" in l for l in lines)
+    assert "None" not in r["text"]           # 列值必须落到结构化行（别名不再二次映射）
+
+
+def test_json_cross_turn_keeps_schema_and_date():
+    import json
+    import qa.engine as e
+    q1 = "只返回 date,tmin,rain,risk,action 五个字段的 JSON，日期用 2026-10-20"
+    r1 = e.answer(q1)
+    r2 = e.answer("下一天也用相同字段", None,
+                  [{"role": "user", "content": q1}, {"role": "assistant", "content": r1["text"]}], r1["state"])
+    obj = json.loads(r2["text"])
+    assert set(obj.keys()) == {"date", "tmin", "rain", "risk", "action"}
+    assert obj["date"] == "2026-10-21"
+
+
+def test_compound_tasks_dedup_and_task_ref():
+    import qa.engine as e
+    q = "先说未来七天最大风险，再说最大降雨日，最后说明数据更新时间和来源。"
+    r = e.answer(q)
+    assert "最大风险" in r["text"] and "最大降雨" in r["text"] and "更新时间" in r["text"]
+    assert r["text"].count("最大降雨") == 1          # 不重复"最大降雨/降雨"
+    r2 = e.answer("第二项展开说明", None,
+                  [{"role": "user", "content": q}, {"role": "assistant", "content": r["text"]}], r["state"])
+    assert r2["intent"] == "task_ref" and "第 2 项" in r2["text"] and "最大降雨" in r2["text"]
+
+
 def test_english_halflanguage_rejected():
     import qa.engine as e
     r = e.answer("Tomorrow forecast frost risk and temperature high?")

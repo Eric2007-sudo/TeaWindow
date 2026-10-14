@@ -771,11 +771,102 @@ def markdown_table(rows, fields=None):
         return None
     labels = {"date": "日期", "tmax": "Tmax", "tmin": "Tmin", "precip": "降水", "rain": "降水",
               "risk_level": "风险", "risk": "风险", "action": "行动", "suitability": "适宜度"}
-    cols = fields or ["date", "tmax", "tmin", "precip", "risk_level"]
+
+    def cell(r, c):
+        for k in (c, _FIELD_ALIAS.get(c, c)):
+            if k in r:
+                return r[k]
+        return None
+
+    cols = list(fields) if fields else ["date", "tmax", "tmin", "precip", "risk_level"]
+    # 多行表格若用户未指定日期列，自动补"日期"，避免多天无法区分
+    if len(rows) > 1 and not any(c in ("date", "日期") for c in cols):
+        cols = ["date"] + cols
     out = "| " + " | ".join(labels.get(c, c) for c in cols) + " |\n|" + "---|" * len(cols) + "\n"
     for r in rows:
-        out += "| " + " | ".join(str(r.get(_FIELD_ALIAS.get(c, c))) for c in cols) + " |\n"
+        out += "| " + " | ".join(str(cell(r, c)) for c in cols) + " |\n"
     return out.strip()
+
+
+_REL_TOKENS = [("大后天", 3), ("大前天", -3), ("后天", 2), ("明天", 1), ("明日", 1), ("今天", 0), ("今日", 0),
+               ("下一天", 1), ("后一天", 1), ("次日", 1), ("第二天", 1), ("前一天", -1), ("前日", -1),
+               ("昨天", -1), ("昨日", -1)]
+
+
+def _date_refs(q):
+    """按出现顺序返回日期引用：[('abs', date) | ('rel', offset)]，最长词优先、去重叠。"""
+    q = q or ""
+    refs = []
+    for m in re.finditer(r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})", q):
+        try:
+            refs.append((m.start(), "abs", datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))))
+        except ValueError:
+            pass
+    for m in re.finditer(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?", q):
+        try:
+            refs.append((m.start(), "abs", datetime.date(season.today().year, int(m.group(1)), int(m.group(2)))))
+        except ValueError:
+            pass
+    spans = []
+    for k, v in sorted(_REL_TOKENS, key=lambda x: -len(x[0])):
+        start = 0
+        while True:
+            i = q.find(k, start)
+            if i < 0:
+                break
+            if not any(not (i + len(k) <= s or i >= e) for s, e in spans):
+                spans.append((i, i + len(k)))
+                refs.append((i, "rel", v))
+            start = i + 1
+    refs.sort(key=lambda x: x[0])
+    return refs
+
+
+def target_days(ctx, q):
+    """解析问题中引用的日期集合（支持'2026-10-20 和下一天'这类混合），按出现顺序返回逐日对象。"""
+    refs = _date_refs(q)
+    if not refs:
+        return []
+    base, order = None, []
+    for _, kind, val in refs:
+        if kind == "abs":
+            base, iso = val, val.isoformat()
+        else:
+            b = base or season.today()
+            iso = (b + datetime.timedelta(days=int(val))).isoformat()
+        if iso not in order:
+            order.append(iso)
+    days = []
+    for iso in order:
+        d = next((x for x in ctx["fc"] if x["date"] == iso), None) or \
+            next((x for x in ctx["hist"] if x["date"] == iso), None)
+        if d is not None:
+            days.append(d)
+    return days
+
+
+def _day_base(d):
+    return {"date": d["date"], "tmin": d.get("tmin"), "tmax": d.get("tmax"), "precip": d.get("precip"),
+            "p_frost": d.get("p_frost"), "p_heat": d.get("p_heat"), "risk_level": d.get("risk_level"),
+            "risk_R": d.get("risk_R"), "suitability": int(d.get("suitability") or 0),
+            "action": day_advice(d, season.is_off())}
+
+
+def structured_rows(ctx, q, fields=None):
+    """表格/多日结构化输出的**统一行数组**：JSON 与 Markdown 共用，渲染器只换格式、不重选日期/字段。"""
+    days = target_days(ctx, q)
+    if not days:
+        return []
+    rows = []
+    for d in days:
+        b = _day_base(d)
+        if fields:
+            row = {f: b.get(_FIELD_ALIAS.get(f, f)) for f in fields}
+            row.setdefault("date", b["date"])   # 多日表格需要日期列以区分
+            rows.append(row)
+        else:
+            rows.append(b)
+    return rows
 
 
 HANDLERS = {

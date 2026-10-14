@@ -460,13 +460,29 @@ def _extract_state(q, history, r, base=None):
 _KNOWN_FIELDS = {"date", "tmin", "tmax", "temp", "rain", "precip", "risk", "risk_level", "risk_r",
                  "action", "suitability", "p_frost", "p_heat"}
 
+# 中文列名/字段名 → 规范化键（用于"列：日期、最低温、降雨、风险、行动"这类请求）
+_CN2FIELD = [("最低气温", "tmin"), ("最低温度", "tmin"), ("最低温", "tmin"),
+             ("最高气温", "tmax"), ("最高温度", "tmax"), ("最高温", "tmax"),
+             ("降雨", "rain"), ("降水", "rain"), ("雨量", "rain"),
+             ("适宜度", "suitability"), ("霜冻概率", "p_frost"), ("高温概率", "p_heat"),
+             ("风险等级", "risk"), ("风险", "risk"), ("行动", "action"), ("措施", "action"), ("建议", "action"),
+             ("日期", "date"), ("时间", "date")]
+_FIELD_CUES = ("字段", "列", "表头", "包含")
+
 
 def _parse_fields(q):
-    """从"字段为 date,tmin,rain,risk,action"等请求中解析用户指定字段。"""
-    m = re.search(r"字段[为是:：]?\s*([A-Za-z_,\s/]+)", q or "")
-    seg = m.group(1) if m else (q or "")
-    toks = [t.lower() for t in re.findall(r"[A-Za-z_]+", seg)]
-    sel = [t for t in toks if t in _KNOWN_FIELDS]
+    """解析用户指定字段：英文（date,tmin,…）与中文（日期、最低温、降雨、风险、行动）。"""
+    q = q or ""
+    m = re.search(r"字段[为是:：]?\s*([A-Za-z_,\s/]+)", q)
+    seg = m.group(1) if m else q
+    sel = [t for t in (t.lower() for t in re.findall(r"[A-Za-z_]+", seg)) if t in _KNOWN_FIELDS]
+    if any(c in q for c in _FIELD_CUES):
+        cue = min([q.find(c) for c in _FIELD_CUES if c in q])
+        tail = q[cue:]
+        hits = sorted((tail.find(k), v) for k, v in _CN2FIELD if k in tail)
+        for _, v in hits:
+            if v not in sel:
+                sel.append(v)
     return list(dict.fromkeys(sel)) or None
 
 
@@ -494,11 +510,10 @@ def answer(question, context=None, history=None, state=None):
                 r["text"] = json.dumps(obj, ensure_ascii=False)
                 r["format"] = "json"
         elif st.get("format") == "table":
-            obj = nlg.structured_answer(ctx, q2, None)
-            if isinstance(obj, dict):
-                rows = obj.get("days") or ([obj] if obj.get("date") else [])
-            else:
-                rows = []
+            rows = nlg.structured_rows(ctx, q2, fields)   # 统一行数组：多日/指定列都从这里来
+            if not rows:
+                obj = nlg.structured_answer(ctx, q2, fields)
+                rows = obj.get("days") or ([obj] if isinstance(obj, dict) and obj.get("date") else [])
             tbl = nlg.markdown_table(rows, fields)
             if tbl:
                 r["text"] = tbl
@@ -564,6 +579,29 @@ def _answer_impl(question, context=None, history=None, state=None):
                           chain=["会话记忆: 滚动摘要"])
         return _reply("这是第一轮，你还没有问过上一个问题。可以问我：今天有风险吗 / 要不要防冻 / 先采哪块地。",
                       intent="memory")
+
+    # 任务引用：定位上一轮复合回答的"第 N 项"（如"第二项展开说明，并给行动建议"）
+    _tm = re.search(r"第\s*([一二三四五六七八九十\d]+)\s*[项个条]", question)
+    if _tm and isinstance(state, dict) and state.get("task_results"):
+        try:
+            from . import nlg as _nt
+            tok = _tm.group(1)
+            idx = int(tok) if tok.isdigit() else _nt._cn2num(tok)
+        except Exception:  # noqa: BLE001
+            idx = int(_tm.group(1)) if _tm.group(1).isdigit() else None
+        tr = next((x for x in state["task_results"] if x.get("idx") == idx), None) if idx else None
+        if tr:
+            body = tr.get("text", "")
+            if any(k in question for k in ["行动", "建议", "怎么办", "措施", "怎么处理", "应对"]):
+                try:
+                    from . import nlg as _na
+                    rr = _na.compose(tr["intent"], question, _slots(question, data), data)
+                    if rr.get("text") and rr["text"] not in body:
+                        body = body + "\n行动建议：" + rr["text"]
+                except Exception:  # noqa: BLE001
+                    pass
+            return _reply(f"第 {idx} 项（{tr.get('label', '')}）：{body}", intent="task_ref",
+                          chain=[f"任务引用: 第{idx}项 {tr.get('intent')}"])
 
     active_date = state.get("active_date")
     mrel = re.search(r"(前一天|前一日|昨天|昨日|前日)", question)
@@ -640,12 +678,6 @@ def _answer_impl(question, context=None, history=None, state=None):
     has_sep = any(sep in question for sep in ["、", ",", "，", "和", "同时", "以及", "还有"])
     if q0 in _CANCEL:
         return _reply("好的，已取消上一个问题。你可以继续问：今天风险 / 要不要防冻 / 先采哪块地 / 天气逐日。", intent="cancel")
-    try:
-        from . import nlg as _nl
-        _field_query = bool(_nl._asks_fields(question) and
-                            (_nl._parse_abs_date(question) or _nl._day_offset(question) or _nl._horizon(question)))
-    except Exception:  # noqa: BLE001
-        _field_query = False
     tasks = _ordered_tasks(stripped)
     # 取消/改口（最后指令优先）：REMOVE 被取消任务，ADD 新任务
     try:
@@ -662,25 +694,31 @@ def _answer_impl(question, context=None, history=None, state=None):
             state["tasks"] = [x for x in (state.get("tasks") or []) if x not in removed]
     except Exception:  # noqa: BLE001
         pass
-    if not is_follow and not _field_query and (len(tasks) >= 3 or (len(tasks) >= 2 and has_sep)):
+    # 任务清单审计：存在"最大降雨"时不再单列通用"降雨"；存在"更新时间/来源"时不再单列"数据来源"
+    _its = [t[1] for t in tasks]
+    if "rain_max" in _its:
+        tasks = [t for t in tasks if t[1] != "rain"]
+    if "ops" in _its:
+        tasks = [t for t in tasks if t[1] != "data_source"]
+    if not is_follow and (len(tasks) >= 3 or (len(tasks) >= 2 and has_sep)):
         try:
             from . import nlg as _nlg
         except Exception:  # noqa: BLE001
             _nlg = None
         if _nlg is not None:
-            lines, used = [], []
-            for idx, (label, it) in enumerate(tasks[:4], 1):
+            results = []
+            for idx, (label, it) in enumerate(tasks[:5], 1):
                 rr = _nlg.compose(it, qt, _slots(qt, data), data)
-                lines.append(f"{idx}) {label}：{rr['text']}")
-                used.append(it)
-            head = "按你的要求逐项回答：\n" + "\n".join(lines)
-            st_tasks = {k: it for k, it in tasks[:4]}
+                results.append({"idx": idx, "label": label, "intent": it, "text": rr["text"]})
+            head = "按你的要求逐项回答：\n" + "\n".join(
+                f"{x['idx']}) {x['label']}：{x['text']}" for x in results)
+            used = [x["intent"] for x in results]
             return {"engine": "teawindow-own", "mode": "rules", "intent": "+".join(used),
                     "confidence": 0.9, "backend": intent_backend(), "retrieval": retrieval_backend(),
                     "slots": {}, "detail": False, "follow_up": False,
                     "text": _nlg.season.clean_text(head),
                     "chain": ["任务规划(有序): " + "+".join(used)],
-                    "state": {"tasks": list(st_tasks.values())}}
+                    "state": {"tasks": used, "task_results": results}}
 
     if strong:
         intent, conf = strong, 0.9            # 强关键词：置信度稳定（避免前后不一致）
