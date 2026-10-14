@@ -773,7 +773,8 @@ def _answer_impl(question, context=None, history=None, state=None):
         intent, conf = kw, 0.85               # 关键词命中：稳定
     # 检索增强（RAG 思路）：低置信/疑似域外时用近邻意图做回退或澄清
     retr = None
-    if not strong and not kw:
+    _fmt_state = isinstance(state, dict) and state.get("format") in ("json", "table")
+    if not strong and not kw and not _fmt_state:   # 结构化格式将由渲染器处理，跳过检索回退（省时延）
         retr = _retrieval_nearest(qt)
         top = retr[0] if retr else None
         in_scope = bool(top and top["intent"] not in ("oos", "greet") and top["sim"] >= RETR_ADOPT)
