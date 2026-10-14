@@ -128,6 +128,8 @@ STRONG = [
     ("数据来源", "data_source"), ("从哪来", "data_source"), ("用什么模型", "model"), ("准确率", "model"),
     ("刷新", "ops"), ("多久更新", "ops"), ("多久刷新", "ops"), ("过期", "ops"), ("数据年龄", "ops"),
     ("降级", "ops"), ("断网", "ops"), ("提前期", "ops"), ("运行批次", "ops"), ("血缘", "ops"), ("更新时间", "ops"),
+    ("误差", "ops"), ("准不准", "model"), ("可信", "data_source"), ("可靠", "data_source"), ("靠谱", "data_source"),
+    ("造假", "data_source"), ("数据", "data_source"),
     ("传感器", "data_source"), ("台站", "data_source"), ("实时站", "data_source"), ("现场站", "data_source"),
     ("受灾", "data_source"), ("产量", "data_source"), ("盲测", "data_source"), ("误报", "model"), ("漏报", "model"),
     ("哪块地", "plot"), ("地块", "plot"),

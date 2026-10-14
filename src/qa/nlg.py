@@ -441,6 +441,13 @@ def data_source(ctx, q, detail):
     kg = ctx["data"].get("_kg") or {}
     from . import engine as _e  # 复用 knowledge
     kg = _e._load_kg()
+    if any(k in q for k in ["可信", "可靠", "靠谱", "真实", "造假", "准不准"]):
+        return ("可信度说明：气象来自 Open-Meteo（ERA5+预报，权威公开聚合，但**非中国气象部门正式预警**）；"
+                "台站为 Meteostat 杭州站（WMO 58457，距约 7.1km，非茶园现场）；土壤水分为**模式估计**；"
+                "展示风险 R 为**专家规则值**（弱标签口径，AUC 不代表真实灾害准确率）；"
+                "未来 16 天为**模式预报**，存在不确定性，且快照可能与上游最新有决策级差异。"
+                "请以官方预警与田间实勘为准。",
+                ["可信度: 来源/性质/不确定性与边界"])
     if not detail:
         return "数据来自公开源：Open-Meteo(气象)、Meteostat(台站观测)、NASA GIBS/Sentinel-2(遥感)、Open-Meteo DEM(地形)。", ["本项目数据管线"]
     return "数据来源：" + "；".join(kg["data_sources"]) + "。", ["本项目数据管线"]

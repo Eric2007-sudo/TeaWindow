@@ -796,3 +796,14 @@ def test_nonce_dedup_store():
     import store
     assert store.use_nonce("n-uniq-test-1", "d1") is True
     assert store.use_nonce("n-uniq-test-1", "d1") is False
+
+
+def test_credibility_question_not_hijacked():
+    import qa.engine as e
+    h = [{"role": "user", "content": "未来7天逐日风险"},
+         {"role": "assistant", "content": "未来 7 天逐日风险（梅家坞）：- 10-14 中(R=0.315)"}]
+    r = e.answer("这个数据可信吗", history=h)
+    assert r["intent"] == "data_source", r["intent"]
+    assert "可信度" in r["text"]
+    assert e.answer("这些数据可靠吗")["intent"] == "data_source"
+    assert e.answer("准不准")["intent"] == "model"
