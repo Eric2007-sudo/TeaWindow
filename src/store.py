@@ -49,6 +49,12 @@ def _db():
         _conn.execute("""CREATE TABLE IF NOT EXISTS refresh_state(
             k TEXT PRIMARY KEY, ts TEXT, status TEXT, duration_s REAL, error TEXT,
             last_success TEXT, next_planned TEXT)""")
+        # 验证运行归档（把"预测验证"也纳入血缘）
+        _conn.execute("""CREATE TABLE IF NOT EXISTS verifications(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, build TEXT, sha256 TEXT, summary TEXT, payload TEXT)""")
+        # 告警通知状态（避免重复推送）
+        _conn.execute("""CREATE TABLE IF NOT EXISTS alerts_state(
+            k TEXT PRIMARY KEY, ts TEXT, codes TEXT)""")
         for col, typ in (("upstream_url", "TEXT"), ("params", "TEXT"), ("raw_sha256_full", "TEXT")):
             try:
                 _conn.execute(f"ALTER TABLE data_versions ADD COLUMN {col} {typ}")
@@ -278,6 +284,60 @@ def get_refresh_state():
     if not row:
         return {"status": "unknown", "last_success": None}
     return dict(zip(("ts", "status", "duration_s", "error", "last_success", "next_planned"), row))
+
+
+# ---------------- 验证运行归档 + 告警通知状态 ----------------
+def add_verification(ts, build, sha256, summary, payload):
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT INTO verifications(ts,build,sha256,summary,payload) VALUES(?,?,?,?,?)",
+                  (ts, build, sha256, json.dumps(summary, ensure_ascii=False), payload))
+        c.commit()
+        return c.execute("SELECT COUNT(*) FROM verifications").fetchone()[0]
+
+
+def list_verifications(limit=20):
+    with _LOCK:
+        rows = _db().execute("SELECT ts,build,sha256,summary FROM verifications ORDER BY id DESC LIMIT ?",
+                             (max(1, min(limit, 200)),)).fetchall()
+    out = []
+    for ts, build, sha, summary in rows:
+        try:
+            s = json.loads(summary) if summary else {}
+        except Exception:  # noqa: BLE001
+            s = {}
+        out.append({"ts": ts, "build": build, "sha256": sha, "summary": s})
+    return out
+
+
+def latest_verification():
+    with _LOCK:
+        row = _db().execute("SELECT ts,build,sha256,summary,payload FROM verifications ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    ts, build, sha, summary, payload = row
+    return {"generated": ts, "build": build, "sha256": sha,
+            "summary": json.loads(summary) if summary else {}, "payload": payload}
+
+
+def set_alerts_state(codes):
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO alerts_state(k,ts,codes) VALUES('main',?,?)",
+                  (datetime_now(), json.dumps(sorted(codes), ensure_ascii=False)))
+        c.commit()
+
+
+def get_alerts_state():
+    with _LOCK:
+        row = _db().execute("SELECT ts,codes FROM alerts_state WHERE k='main'").fetchone()
+    if not row:
+        return {"ts": None, "codes": []}
+    try:
+        codes = json.loads(row[1]) if row[1] else []
+    except Exception:  # noqa: BLE001
+        codes = []
+    return {"ts": row[0], "codes": codes}
 
 
 # ---------------- 盲测评估：预测快照 × 田间结果（事件级） ----------------

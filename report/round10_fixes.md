@@ -69,3 +69,8 @@
 - 蒸馏学生 `rbt3`：eval **91.1%** / 挑战 86.7%，**低于**在线部署版（94.5% / 93.3%）。
 - 嵌入（BGE）重训：检索 0.767 ≈ 现版 0.774，无提升。
 - 决策：**保留在线部署模型**（`qa_intent_rbt3_oos` + `qa_embedder_onnx`）；本轮训练记为负结果，语料与脚本保留可复现。
+
+## 十一、验证归档 + 告警通知（本轮）
+- **验证入库血缘**：`verifications` 表（run 时间/build/SHA-256/汇总）；`/api/forecast/verify` 优先返回最新入库结果；`/api/forecast/verify/history` 历史；**每 6 小时**自动跑。
+- **告警通知**：`ALERT_WEBHOOK_URL`；仅在告警**新增/变化**时推送（状态存 `alerts_state`）；**每 30 分钟**检查；`POST /api/alerts/test`（管理员）发测试；`/api/alerts` 增 `webhook_configured/notified`。
+- 测试 83 → **85**。

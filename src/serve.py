@@ -72,6 +72,7 @@ app = FastAPI(title="TeaWindow API", version="1.0",
 MAX_BODY = int(os.environ.get("MAX_BODY_BYTES", "65536"))
 # LLM 每日预算（P0-4：昂贵调用独立配额）
 LLM_DAILY_BUDGET = int(os.environ.get("LLM_DAILY_BUDGET", "300"))
+ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "")
 _llm_usage = {"date": "", "count": 0}
 
 
@@ -685,8 +686,14 @@ try:
     _sched.add_job(lambda: _refresh(True), "cron", hour=6, minute=0, id="daily_refresh")
     _sched.add_job(lambda: _refresh(True), "cron", hour="0,3,9,12,15,18,21", minute=20, id="refresh_3h",
                    replace_existing=True)
+    # 预测验证归档（每 6 小时）
+    _sched.add_job(lambda: _run_verify(60), "cron", hour="1,7,13,19", minute=35, id="verify_6h",
+                   replace_existing=True)
+    # 告警检查与通知（每 30 分钟）
+    _sched.add_job(lambda: _notify_alerts(), "cron", minute="5,35", id="alerts_30m",
+                   replace_existing=True)
     _sched.start()
-    print("[serve] 已启用定时刷新（每日 06:00 + 每 3 小时）")
+    print("[serve] 已启用定时任务（刷新 3h / 验证 6h / 告警 30m）")
 except Exception as e:  # noqa: BLE001
     print("[serve] 未启用定时任务:", e)
 
@@ -709,25 +716,52 @@ def data_snapshot(request: Request):
 
 @app.get("/api/forecast/verify")
 def forecast_verify():
-    """提前期真实误差（权威在线归档 Previous Runs vs ERA5）。"""
+    """提前期 + 多年春采季真实误差（权威在线归档）。优先返回已入库的最新验证。"""
+    lv = store.latest_verification()
+    if lv and isinstance(lv.get("payload"), str):
+        try:
+            data = json.loads(lv["payload"])
+            data["_meta"] = {"generated": lv.get("generated"), "build": lv.get("build"), "sha256": lv.get("sha256")}
+            return JSONResponse(data)
+        except Exception:  # noqa: BLE001
+            pass
     if not os.path.exists(VERIFY_JSON):
         return {"status": "pending", "note": "调用 POST /api/forecast/verify/refresh 生成"}
     return JSONResponse(json.load(open(VERIFY_JSON, encoding="utf-8")))
 
 
+@app.get("/api/forecast/verify/history")
+def forecast_verify_history(limit: int = 10):
+    """验证运行历史（把"预测验证"纳入数据血缘）。"""
+    return {"count": len(store.list_verifications(limit)), "runs": store.list_verifications(limit)}
+
+
+def _run_verify(days=60):
+    try:
+        import hashlib
+        import forecast_verify as fv
+        sys.argv = ["forecast_verify", "--days", str(days)]
+        fv.main()
+        p = VERIFY_JSON
+        if os.path.exists(p):
+            raw = open(p, "rb").read()
+            data = json.loads(raw.decode("utf-8"))
+            summary = {"lead_tmin_mae": {str(r["lead"]): r["tmin_mae"] for r in data.get("leads", [])},
+                       "spring_pooled": (data.get("spring", {}) or {}).get("pooled"),
+                       "years": (data.get("spring", {}) or {}).get("years")}
+            store.add_verification(season.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                   (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
+                                   hashlib.sha256(raw).hexdigest()[:16], summary, raw.decode("utf-8"))
+        return {"status": "ok"}
+    except Exception as e:  # noqa: BLE001
+        print("[verify] run failed:", e)
+        return {"status": "error", "error": repr(e)}
+
+
 @app.post("/api/forecast/verify/refresh")
 def forecast_verify_refresh(request: Request, background: BackgroundTasks, days: int = 60):
     _require_admin(request)
-
-    def _run():
-        try:
-            import forecast_verify as fv
-            sys.argv = ["forecast_verify", "--days", str(days)]
-            fv.main()
-        except Exception as e:  # noqa: BLE001
-            print("[verify] refresh failed:", e)
-
-    background.add_task(_run)
+    background.add_task(_run_verify, days)
     return {"status": "scheduled", "days": days}
 
 
@@ -860,9 +894,7 @@ def ready():
             "refresh": fr.get("refresh"), "server_time": season.now().isoformat(timespec="seconds")}
 
 
-@app.get("/api/alerts")
-def alerts():
-    """规则化告警（公开只读，仅状态码/级别，不含隐私）。"""
+def _collect_alerts():
     out = []
     try:
         fr = _freshness() if os.path.exists(DATA_JSON) else {}
@@ -882,7 +914,49 @@ def alerts():
             out.append({"level": "info", "code": "no_versions", "msg": "暂无数据版本快照"})
     except Exception as e:  # noqa: BLE001
         out.append({"level": "error", "code": "alerts_error", "msg": repr(e)})
-    return {"alerts": out, "count": len(out), "server_time": season.now().isoformat(timespec="seconds")}
+    return out
+
+
+def _push_webhook(payload):
+    if not ALERT_WEBHOOK_URL:
+        return {"sent": False, "reason": "ALERT_WEBHOOK_URL 未配置"}
+    try:
+        import requests
+        r = requests.post(ALERT_WEBHOOK_URL, json=payload, timeout=15)
+        return {"sent": r.status_code < 400, "status": r.status_code}
+    except Exception as e:  # noqa: BLE001
+        return {"sent": False, "reason": repr(e)}
+
+
+def _notify_alerts(force=False):
+    """告警变化时推送到 webhook（避免重复刷屏）。"""
+    cur = _collect_alerts()
+    codes = {a["code"] for a in cur if a["level"] in ("warn", "error")}
+    prev = set(store.get_alerts_state().get("codes") or [])
+    if force or codes - prev:      # 新增/变化才推送
+        res = _push_webhook({"site": "梅家坞 TeaWindow",
+                             "server_time": season.now().isoformat(timespec="seconds"),
+                             "new": sorted(codes - prev), "active": sorted(codes),
+                             "alerts": cur})
+        store.set_alerts_state(codes)
+        return {"notified": True, "new": sorted(codes - prev), **res}
+    store.set_alerts_state(codes)
+    return {"notified": False, "reason": "no_change", "active": sorted(codes)}
+
+
+@app.get("/api/alerts")
+def alerts():
+    """规则化告警（公开只读，仅状态码/级别，不含隐私）。"""
+    cur = _collect_alerts()
+    return {"alerts": cur, "count": len(cur), "server_time": season.now().isoformat(timespec="seconds"),
+            "webhook_configured": bool(ALERT_WEBHOOK_URL),
+            "notified": store.get_alerts_state()}
+
+
+@app.post("/api/alerts/test")
+def alerts_test(request: Request):
+    _require_admin(request)
+    return _notify_alerts(force=True)
 
 
 # 静态站点挂到最后，"/" 作为兜底（API 路由优先）

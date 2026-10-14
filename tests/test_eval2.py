@@ -573,3 +573,19 @@ def test_versions_have_lineage_fields():
     v = c.get("/api/data/versions?limit=1").json()
     if v["versions"]:
         assert "raw_sha256" in v["versions"][0]
+
+
+def test_verify_history_and_alerts_webhook():
+    c = _client()
+    h = c.get("/api/forecast/verify/history?limit=5")
+    assert h.status_code == 200 and "runs" in h.json()
+    a = c.get("/api/alerts").json()
+    assert "webhook_configured" in a and "notified" in a
+
+
+def test_alerts_test_endpoint(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    r = c.post("/api/alerts/test", headers={"X-Admin-Token": "adm"})
+    assert r.status_code == 200 and "notified" in r.json()
