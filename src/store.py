@@ -133,17 +133,15 @@ def _db():
         for stmt in _ddl():
             try:
                 _conn.execute(stmt)
+                _conn.commit()          # 每条单独提交，避免后续 ALTER 报错把建表一起回滚
             except Exception:  # noqa: BLE001
                 _safe_rollback()
         for col, typ in (("upstream_url", "TEXT"), ("params", "TEXT"), ("raw_sha256_full", "TEXT")):
             try:
                 _conn.execute(f"ALTER TABLE data_versions ADD COLUMN {col} {typ}")
+                _conn.commit()
             except Exception:  # noqa: BLE001
                 _safe_rollback()   # 列已存在时 Postgres 会中断事务，必须回滚
-        try:
-            _conn.commit()
-        except Exception:  # noqa: BLE001
-            _safe_rollback()
     return _conn
 
 
