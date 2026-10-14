@@ -927,6 +927,10 @@ def compose(intent, q, sl, data):
     elif intent == "risk_today":
         cur, fc, H = ctx["cur"], ctx["fc"], ctx["H"]
         fd, off = _focus_day(ctx, q)
+        if fd is None and isinstance(off, str):
+            return {"text": (f"{off} 无逐日数据：可能处于「再分析归档（至前 2 日）」与「预报（自今日）」之间的空档，"
+                             f"或超出近 180 天历史 + 16 天预报范围。可换相邻日期，或看未来 7 天风险。"),
+                    "chain": ["数据范围: 近180天历史 + 16天预报（归档/预报空档）"], "detail": detail}
         if fd is not None:
             dom = []
             if fd.get("frost") or fd.get("cold_shock"):
