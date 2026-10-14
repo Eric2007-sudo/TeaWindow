@@ -156,9 +156,14 @@ def _compare_upstream(force=False):
                   "longitude": d.get("meta", {}).get("lon", 120.0961),
                   "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
                   "forecast_days": 16, "timezone": "Asia/Shanghai"}
+        url = "https://api.open-meteo.com/v1/forecast"
+        _omk = os.environ.get("OPEN_METEO_API_KEY", "")
+        if _omk:
+            url = "https://customer-api.open-meteo.com/v1/forecast"
+            params["apikey"] = _omk
         r = None
         for i in range(3):
-            r = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=30,
+            r = requests.get(url, params=params, timeout=30,
                              headers={"User-Agent": "TeaWindow/1.0"})
             if r.status_code != 429:
                 break
@@ -337,8 +342,11 @@ def _save_snapshot(fetched_at=None, note=""):
                 fm = json.load(open(fmp, encoding="utf-8"))
         except Exception:  # noqa: BLE001
             fm = {}
+        source = "Open-Meteo (ERA5 + forecast)"
+        if fm.get("forecast_source") in ("met.no", "cached"):
+            source = f"Open-Meteo(ERA5) + {fm.get('forecast_source')}"
         meta = {"ts": season.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "source": "Open-Meteo (ERA5 + forecast)", "model": "teawindow-pipeline",
+                "source": source, "model": "teawindow-pipeline",
                 "gen_time": d.get("meta", {}).get("updated"),
                 "fetched_at": fetched_at or fm.get("fetched_at") or (d.get("meta", {}) or {}).get("fetched_at") or d.get("meta", {}).get("updated"),
                 "lat": d.get("meta", {}).get("lat"), "lon": d.get("meta", {}).get("lon"),
@@ -1155,6 +1163,20 @@ def alerts():
 def alerts_test(request: Request):
     _require_admin(request)
     return _notify_alerts(force=True)
+
+
+@app.post("/api/alerts/echo")
+async def alerts_echo(request: Request):
+    """Webhook 回环自测端点：接收并记录投递，用于验证 HTTP 送达链路（真实渠道替换 URL 即可）。"""
+    body = await request.body()
+    try:
+        payload = json.loads(body or b"{}")
+    except Exception:  # noqa: BLE001
+        payload = {}
+    nc = payload.get("new") or []
+    store.add_alert_delivery(nc, True, "echo received")
+    return {"ok": True, "received_new": nc, "received_active": payload.get("active") or [],
+            "server_time": season.now().isoformat(timespec="seconds")}
 
 
 @app.get("/api/forecast/compare")

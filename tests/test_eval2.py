@@ -867,3 +867,18 @@ def test_refresh_guards_uvicorn_argv(monkeypatch):
         assert called.get("argv") == ["pipeline"]
     finally:
         sys.argv = orig
+
+
+def test_openmeteo_key_endpoint(monkeypatch):
+    import fetch_weather as fw
+    monkeypatch.setattr(fw, "OM_KEY", "k123")
+    url, p = fw._om("https://api.open-meteo.com/v1/forecast", {"a": 1})
+    assert "customer-api.open-meteo.com" in url and p.get("apikey") == "k123"
+    url2, p2 = fw._om("https://archive-api.open-meteo.com/v1/archive", {})
+    assert "customer-archive-api.open-meteo.com" in url2
+
+
+def test_alerts_echo_endpoint():
+    c = _client()
+    r = c.post("/api/alerts/echo", json={"new": ["data_stale"], "active": ["data_stale"]})
+    assert r.status_code == 200 and r.json().get("ok") is True

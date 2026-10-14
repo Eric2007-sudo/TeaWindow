@@ -13,9 +13,14 @@ jobs:
     steps:
       - name: Trigger refresh & keep-alive
         run: |
-          echo "== wake up / refresh =="
-          curl -sS -m 180 -X POST "https://teawindow.onrender.com/api/refresh" \
+          echo "== wake up / health =="
+          curl -sS -m 120 --retry 3 --retry-delay 15 --retry-all-errors \
+               "https://teawindow.onrender.com/api/health" || true
+          echo ""
+          echo "== light refresh (forecast-only) =="
+          curl -sS -m 300 --retry 4 --retry-delay 30 --retry-all-errors -X POST \
+               "https://teawindow.onrender.com/api/refresh?fetch=true" \
                -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}" || true
           echo ""
-          echo "== health =="
-          curl -sS -m 180 "https://teawindow.onrender.com/api/health" || true
+          echo "== ready (refresh/last_success) =="
+          curl -sS -m 120 "https://teawindow.onrender.com/api/ready" || true
