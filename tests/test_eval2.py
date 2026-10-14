@@ -606,3 +606,77 @@ def test_store_postgres_sql_translation(monkeypatch):
     assert "%s" in s1 and "ON CONFLICT DO NOTHING" in s1
     s2 = store._tr("INSERT OR REPLACE INTO refresh_state(k,ts,status) VALUES(?,?,?)")
     assert "ON CONFLICT (k)" in s2 and "EXCLUDED.status" in s2
+
+
+# ---------------- 第六/七轮：意图稳定 / 状态合并 / 运行问答 / 格式 / 英文 ----------------
+def test_week_list_intents_and_stable_conf():
+    import qa.engine as e
+    for q in ["将来一周有什么风险", "我问将来一周每天情况", "未来7天每天风险"]:
+        r = e.answer(q)
+        assert r["intent"] == "forecast_list", (q, r["intent"])
+        assert r["confidence"] == 0.9
+
+
+def test_state_merge_three_turns():
+    import qa.engine as e
+    st = {"active_date": "2026-10-20"}
+    r1 = e.answer("那一天要不要排水", state=st); st = r1.get("state") or st
+    assert st.get("active_date") == "2026-10-20"
+    r2 = e.answer("它的最低温是多少", state=st); st = r2.get("state") or st
+    assert st.get("active_date") == "2026-10-20"
+    assert "2026-10-20" in r2["text"]
+
+
+def test_next_day_relative():
+    import qa.engine as e
+    r = e.answer("下一天呢", state={"active_date": "2026-10-20"})
+    assert "2026-10-21" in r["text"]
+
+
+def test_negation_change_no_forbidden():
+    import qa.engine as e
+    r = e.answer("不要防冻建议，改成灌溉")
+    assert "frost" not in r["intent"]          # 被否定的意图不应再出现
+    assert "夜晨覆盖" not in r["text"] and "熏烟" not in r["text"]
+
+
+def test_ops_questions():
+    import qa.engine as e
+    assert e.answer("多久刷新一次，现在是否过期")["intent"] == "ops"
+    assert e.answer("Open-Meteo 断网怎么降级")["intent"] == "ops"
+    assert "MAE" in e.answer("3天预测误差和运行批次")["text"]
+
+
+def test_json_obeys_requested_fields():
+    import json
+    import qa.engine as e
+    r = e.answer("用JSON返回，字段为 date,tmin,rain,risk,action", state={"format": "json"})
+    obj = json.loads(r["text"])
+    row = obj["days"][0] if "days" in obj else obj
+    assert set(row.keys()) == {"date", "tmin", "rain", "risk", "action"}
+
+
+def test_markdown_table_format():
+    import qa.engine as e
+    r = e.answer("用表格列出未来3天温度降雨风险", state={"format": "table"})
+    assert r.get("format") == "table" and r["text"].lstrip().startswith("|")
+
+
+def test_english_halflanguage_rejected():
+    import qa.engine as e
+    r = e.answer("Tomorrow forecast frost risk and temperature high?")
+    assert r["intent"] in ("unknown", "oos")
+
+
+def test_outcome_negative_kind_and_ready_fields(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "SENSOR_TOKEN", "st")
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    r = c.post("/api/outcome", json={"date": "2026-10-19", "kind": "巡查无灾"},
+               headers={"X-Sensor-Token": "st"})
+    assert r.status_code == 200
+    pj = c.get("/api/pilot/evaluate", headers={"X-Admin-Token": "adm"}).json()
+    assert pj["status"] in ("pending", "ready")
+    rd = c.get("/api/ready").json()
+    assert "lineage_ok" in rd and "refresh_ok" in rd and "warnings" in rd

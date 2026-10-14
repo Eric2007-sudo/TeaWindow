@@ -11,7 +11,8 @@
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const days = D.days;
   const hist = days.filter(d => d.source === "history");
-  const fc = days.filter(d => d.source === "forecast");
+  const todayIsoCN = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+  const fc = days.filter(d => d.source === "forecast" && d.date >= todayIsoCN);   // 未来窗口仅今天起
   const byDate = {}; days.forEach(d => byDate[d.date] = d);
   const RISK = { "低": "#3fb950", "中": "#d6b657", "高": "#e08a3c", "极高": "#e5534b" };
   const md = s => (s || "").slice(5);

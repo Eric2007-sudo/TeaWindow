@@ -309,7 +309,7 @@ def list_audit(limit=100):
 
 
 # ---------------- 田间结果（前瞻性盲测真值） ----------------
-OUTCOME_KINDS = {"采摘", "霜冻受灾", "高温灼伤", "连阴雨", "产量", "品质", "其他"}
+OUTCOME_KINDS = {"采摘", "霜冻受灾", "高温灼伤", "连阴雨", "产量", "品质", "巡查无灾", "其他"}
 
 
 def add_outcome(rec):
@@ -420,9 +420,12 @@ def pilot_evaluate(hazard_kinds=None, risk_threshold=0.5):
     outcomes = list_outcomes(1000)
     if not outcomes:
         return {"status": "pending", "reason": "no_outcomes", "outcomes": 0, "versions": version_count()}
+    # 仅用"显式确认"的日期：受灾事件为正样本；"巡查无灾"为负样本；未上报日期视为 unknown（不计入）
     event_dates = {o["date"]: o for o in outcomes if o.get("kind") in hazard_kinds and o.get("date")}
-    if not event_dates:
-        return {"status": "pending", "reason": "no_hazard_outcomes", "outcomes": len(outcomes), "versions": version_count()}
+    neg_dates = {o["date"]: o for o in outcomes if o.get("kind") == "巡查无灾" and o.get("date")}
+    known = set(event_dates) | set(neg_dates)
+    if not known:
+        return {"status": "pending", "reason": "no_labeled_days", "outcomes": len(outcomes), "versions": version_count()}
     vers = list_versions(200)
     if not vers:
         return {"status": "pending", "reason": "no_snapshots", "outcomes": len(outcomes), "versions": 0}
@@ -444,10 +447,12 @@ def pilot_evaluate(hazard_kinds=None, risk_threshold=0.5):
             if d["date"] not in pred_pos or (v.get("ts") or "") < issued.get(d["date"], "9"):
                 pred_pos[d["date"]] = pos
                 issued[d["date"]] = v.get("ts") or ""
-    all_dates = set(pred_pos) | set(event_dates)
+    all_dates = set(pred_pos) | known
     for day in sorted(all_dates):
         if day > today_iso:
             continue  # 只看已发生（有结果可判定）的日期
+        if day not in known:
+            continue  # 未上报 → unknown，不计入混淆矩阵
         pred = bool(pred_pos.get(day, False))
         actual = day in event_dates
         if pred and actual:
@@ -478,7 +483,10 @@ def pilot_evaluate(hazard_kinds=None, risk_threshold=0.5):
             "false_alarm_rate": None if far is None else round(far, 3),
             "csi": None if csi is None else round(csi, 3),
             "lead_days_mean": round(_st.mean(leads), 1) if leads else None,
-            "n_events": len(event_dates), "n_snapshots": len(vers),
+            "n_events": len(event_dates), "n_negatives": len(neg_dates),
+            "unknown_days": len(set(pred_pos) - known),
+            "n_snapshots": len(vers),
+            "note": "仅用显式确认结果：受灾=正样本、巡查无灾=负样本；未上报日期不计入（unknown）。",
             "samples": samples[:50]}
 
 

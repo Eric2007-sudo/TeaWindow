@@ -1,0 +1,22 @@
+{
+  "fetched_at": "2026-10-14 12:54:14",
+  "forecast_url": "https://api.open-meteo.com/v1/forecast",
+  "forecast_params": {
+    "latitude": 30.2139,
+    "longitude": 120.0961,
+    "forecast_days": 16,
+    "timezone": "Asia/Shanghai",
+    "daily": "temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean,et0_fao_evapotranspiration,shortwave_radiation_sum,sunshine_duration,wind_speed_10m_max,soil_moisture_0_to_7cm_mean"
+  },
+  "archive_url": "https://archive-api.open-meteo.com/v1/archive",
+  "archive_params": {
+    "latitude": 30.2139,
+    "longitude": 120.0961,
+    "timezone": "Asia/Shanghai"
+  },
+  "forecast_raw_sha256": "ee78cc3da6bd577c327cc1fe29cd4710945f618de9bd39baece63dd22939d590",
+  "archive_raw_sha256": "87d632f845a31d6c70a5c6aaa8314072786bf42d8cae023601b028ce78061fa5",
+  "lat": 30.2139,
+  "lon": 120.0961,
+  "timezone": "Asia/Shanghai"
+}

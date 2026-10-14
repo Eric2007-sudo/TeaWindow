@@ -83,6 +83,7 @@ KEYWORDS = {
     "harvest_date": ["开采期", "什么时候开采", "几号", "上市"],
     "data_source": ["数据", "来源", "卫星", "遥感", "台站"],
     "model": ["模型", "AI", "准确", "训练", "大模型", "预测"],
+    "ops": ["刷新", "多久更新", "多久刷新", "过期", "数据年龄", "降级", "断网", "提前期", "运行批次", "血缘", "更新时间"],
     "plot": ["哪块地", "地块", "坡", "海拔", "地形"],
     "risk_today": ["风险", "今天", "现在", "预警"],
     "greet": ["你好", "谢谢", "在吗", "早上好"],
@@ -125,12 +126,16 @@ STRONG = [
     ("雨最大", "rain_max"), ("最大雨", "rain_max"), ("哪天雨", "rain_max"), ("降雨最大", "rain_max"),
     ("哪个风险", "compare"), ("哪个更高", "compare"), ("哪个高", "compare"), ("风险更高", "compare"),
     ("数据来源", "data_source"), ("从哪来", "data_source"), ("用什么模型", "model"), ("准确率", "model"),
+    ("刷新", "ops"), ("多久更新", "ops"), ("多久刷新", "ops"), ("过期", "ops"), ("数据年龄", "ops"),
+    ("降级", "ops"), ("断网", "ops"), ("提前期", "ops"), ("运行批次", "ops"), ("血缘", "ops"), ("更新时间", "ops"),
     ("传感器", "data_source"), ("台站", "data_source"), ("实时站", "data_source"), ("现场站", "data_source"),
     ("受灾", "data_source"), ("产量", "data_source"), ("盲测", "data_source"), ("误报", "model"), ("漏报", "model"),
     ("哪块地", "plot"), ("地块", "plot"),
     # 逐日清单（放末尾，灾害类词优先命中）
     ("列举", "forecast_list"), ("列出", "forecast_list"), ("逐日", "forecast_list"),
-    ("每天的", "forecast_list"), ("逐天", "forecast_list"),
+    ("每天的", "forecast_list"), ("每天", "forecast_list"), ("每日", "forecast_list"),
+    ("逐天", "forecast_list"), ("将来", "forecast_list"), ("一周", "forecast_list"),
+    ("这周", "forecast_list"), ("本周", "forecast_list"),
     ("未来一周", "forecast_list"), ("未来7天", "forecast_list"), ("未来七天", "forecast_list"),
     ("未来3天", "forecast_list"), ("未来三天", "forecast_list"), ("未来5天", "forecast_list"),
     ("未来五天", "forecast_list"), ("未来十天", "forecast_list"), ("未来几天", "forecast_list"),
@@ -140,11 +145,17 @@ STRONG = [
 
 # 否定/改口：删除被否定的关键词，避免"不要回答霜冻，我想问雨"仍命中霜冻
 _NEG_RE = re.compile(r"(?:不要|别|不再|不是|不)(?:回答|问|关心|看|问)?\s*"
-                     r"(霜冻|倒春寒|高温|干旱|灌溉|浇水|保险|采摘|排班|风险|连阴雨|降雨|雨水)")
+                     r"(霜冻|倒春寒|高温|干旱|灌溉|浇水|保险|采摘|排班|风险|连阴雨|降雨|雨水|防冻|遮阳|排水)")
+
+
+_NEG_MARK = ["改问", "改成", "换问", "不是问", "不要回答", "别回答", "别问", "算了", "不问", "不是要"]
 
 
 def _strip_negations(q):
-    return _NEG_RE.sub("", q or "")
+    # 仅当出现"改口/否定"标记时才删除被否定关键词，避免误伤"要不要防冻"这类普通问句
+    if not any(m in (q or "") for m in _NEG_MARK):
+        return q
+    return _NEG_RE.sub("", q)
 
 
 def _strong_intent(q):
@@ -394,9 +405,10 @@ def _final_guard(q, txt):
     return txt
 
 
-def _extract_state(q, history, r):
-    """从问题/回答中抽取结构化会话槽位（供前端回传，实现实体级上下文）。"""
-    st = {"intent": r.get("intent")}
+def _extract_state(q, history, r, base=None):
+    """从问题/回答抽取槽位，并以传入 state 为**基底合并**（避免丢失 active_date）。"""
+    st = dict(base or {})
+    st["intent"] = r.get("intent")
     try:
         from . import nlg
         ad = nlg._parse_abs_date(q)
@@ -416,20 +428,42 @@ def _extract_state(q, history, r):
     return st
 
 
+_KNOWN_FIELDS = {"date", "tmin", "tmax", "temp", "rain", "precip", "risk", "risk_level", "risk_r",
+                 "action", "suitability", "p_frost", "p_heat"}
+
+
+def _parse_fields(q):
+    """从"字段为 date,tmin,rain,risk,action"等请求中解析用户指定字段。"""
+    m = re.search(r"字段[为是:：]?\s*([A-Za-z_,\s/]+)", q or "")
+    seg = m.group(1) if m else (q or "")
+    toks = [t.lower() for t in re.findall(r"[A-Za-z_]+", seg)]
+    sel = [t for t in toks if t in _KNOWN_FIELDS]
+    return list(dict.fromkeys(sel)) or None
+
+
 def answer(question, context=None, history=None, state=None):
     q = _normalize(question)
     r = _answer_impl(q, context, history, state)
     try:
-        st = _extract_state(q, history, r)
-        # JSON 输出：给出结构化对象（数值与基础 API 一致）
+        st = _extract_state(q, history, r, state)
+        from . import nlg
+        ctx = nlg.classify_ctx(_load_data(), q)
         if st.get("format") == "json":
-            from . import nlg
-            ctx = nlg.classify_ctx(_load_data(), q)
-            obj = nlg.structured_answer(ctx, q)
+            obj = nlg.structured_answer(ctx, q, _parse_fields(question))
             if obj is not None:
                 r["text"] = json.dumps(obj, ensure_ascii=False)
                 r["format"] = "json"
-        if isinstance(r.get("text"), str) and r.get("format") != "json":
+        elif st.get("format") == "table":
+            obj = nlg.structured_answer(ctx, q)
+            if isinstance(obj, dict):
+                rows = obj.get("days") or ([obj] if obj.get("date") else [])
+            else:
+                rows = []
+            tbl = nlg.markdown_table(rows)
+            if tbl:
+                r["text"] = tbl
+                r["format"] = "table"
+        if isinstance(r.get("text"), str) and r.get("format") not in ("json", "table"):
             r["text"] = _final_guard(q, r["text"])
         r["state"] = st
     except Exception:  # noqa: BLE001
@@ -445,6 +479,11 @@ def _answer_impl(question, context=None, history=None, state=None):
     has_cjk = any("\u4e00" <= c <= "\u9fff" for c in q0)
     if not has_cjk and any(c.isalpha() for c in q0):
         return _reply("This assistant currently supports Chinese only. 请用中文提问，例如：今天有风险吗？")
+    # 半英文（大量英文 + 少量中文）不下猜测：明确拒绝，避免"半翻译"误答
+    latin = len(re.findall(r"[A-Za-z]", q0)); cjk = len(re.findall(r"[\u4e00-\u9fff]", q0))
+    if latin >= 12 and cjk < latin:
+        return _reply("检测到较多英文。本助手目前仅支持中文（含常见中英术语，如 frost/risk）；"
+                      "请用中文提问，例如：今天有风险吗 / 明天要不要防冻 / 先采哪块地。")
     if any(w in q0 for w in OFFTOPIC):
         return _reply("抱歉，我只服务梅家坞茶园的气候风险与采摘决策（如：风险、防冻、灌溉、采摘、保险、开采期）。"
                       "健康/金融等非农业问题请咨询专业人员。")
@@ -470,12 +509,17 @@ def _answer_impl(question, context=None, history=None, state=None):
 
     state = dict(state or {})
     active_date = state.get("active_date")
-    mrel = re.search(r"(前一天|前一日|昨天|昨日)", question)
-    mrel2 = re.search(r"(后一天|次日|第二天)", question)
-    if active_date and (mrel or mrel2):
+    mrel = re.search(r"(前一天|前一日|昨天|昨日|前日)", question)
+    mrel2 = re.search(r"(后一天|次日|第二天|下一天|翌日)", question)
+    mshift = -1 if mrel else (1 if mrel2 else None)
+    if "大前天" in question:
+        mshift = -3
+    elif "前两天" in question:
+        mshift = -2
+    if active_date and mshift is not None:
         try:
             d0 = datetime.date.fromisoformat(str(active_date)[:10])
-            active_date = (d0 + datetime.timedelta(days=(-1 if mrel else 1))).isoformat()
+            active_date = (d0 + datetime.timedelta(days=mshift)).isoformat()
             state["active_date"] = active_date
         except Exception:  # noqa: BLE001
             pass
@@ -515,7 +559,7 @@ def _answer_impl(question, context=None, history=None, state=None):
 
     # 通用复合拆解：主题强意图 + 复合线索（风险/来源/模型/动作/具体灾害）
     comp = [x for x in dict.fromkeys(
-        [s for s in strongs if s not in ("forecast_list", "rain_max", "compare", "greet")] + _compound_intents(question)
+        [s for s in strongs if s not in ("forecast_list", "rain_max", "compare", "greet")] + _compound_intents(stripped)
     ) if x not in ("oos", "unknown", "greet")]
     has_sep = any(sep in question for sep in ["、", ",", "，", "和", "同时", "以及", "还有"])
     try:
@@ -541,9 +585,9 @@ def _answer_impl(question, context=None, history=None, state=None):
                     "chain": ["复合问题拆解: " + "+".join(comp[:3])]}
 
     if strong:
-        intent, conf = strong, max(conf, 0.9)
+        intent, conf = strong, 0.9            # 强关键词：置信度稳定（避免前后不一致）
     elif conf < 0.8 and kw:
-        intent, conf = kw, max(conf, 0.8)
+        intent, conf = kw, 0.85               # 关键词命中：稳定
     # 检索增强（RAG 思路）：低置信/疑似域外时用近邻意图做回退或澄清
     retr = None
     if not strong and not kw:

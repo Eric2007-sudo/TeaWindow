@@ -59,8 +59,10 @@ async def _lifespan(app):  # noqa: ARG001
         if store.version_count() == 0 and os.path.exists(DATA_JSON):
             _save_snapshot(note="startup-existing（沿用已有加工数据，非新抓取）")
             print("[serve] 初始数据版本已记录（沿用已有数据）")
+        if store.get_refresh_state().get("status") == "unknown":
+            store.set_refresh_state("startup", 0.0)   # 标记实例已启动（非 unknown）
     except Exception as e:  # noqa: BLE001
-        print("[serve] 初始快照跳过:", e)
+        print("[serve] 初始快照状态跳过:", e)
     yield
 
 
@@ -133,7 +135,17 @@ def _cur_day(days):
     return past[-1] if past else days[-1]
 
 
-STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "150"))
+STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "60"))
+
+
+def _lineage_ok():
+    try:
+        v = store.list_versions(1)
+        if not v:
+            return False
+        return bool(v[0].get("upstream_url")) and bool(v[0].get("raw_sha256_full"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _freshness(d=None):
@@ -882,17 +894,24 @@ def _api_routes():
 
 @app.get("/api/ready")
 def ready():
-    """发布就绪自检：build + 路由完整 + 数据可用 + 非陈旧。"""
+    """发布就绪自检：build + 路由完整 + 数据可用 + 非陈旧 + 血缘/刷新状态。"""
     has_data = os.path.exists(DATA_JSON)
     fr = _freshness() if has_data else {}
     routes = _api_routes()
     missing = [p for p in CRITICAL_ROUTES if p not in routes]
-    ok = has_data and not missing and (fr.get("stale") is not True)
+    lin = _lineage_ok()
+    rs = store.get_refresh_state()
+    refresh_ok = rs.get("status") not in ("unknown", "error")
+    ok = has_data and not missing and (fr.get("stale") is not True) and lin
     return {"ready": ok, "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
             "route_count": len(routes), "critical_total": len(CRITICAL_ROUTES),
             "missing_critical": missing, "data_ready": has_data,
             "age_minutes": fr.get("age_minutes"), "stale": fr.get("stale"),
-            "refresh": fr.get("refresh"), "server_time": season.now().isoformat(timespec="seconds")}
+            "lineage_ok": lin, "refresh_ok": refresh_ok, "refresh": rs,
+            "warnings": ([not has_data and "no_data"] + [f"missing:{m}" for m in missing]
+                         + (["stale"] if fr.get("stale") else []) + ([] if lin else ["no_lineage"])
+                         + ([] if refresh_ok else ["refresh_unknown"])),
+            "server_time": season.now().isoformat(timespec="seconds")}
 
 
 def _collect_alerts():

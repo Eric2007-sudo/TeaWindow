@@ -145,6 +145,8 @@ def classify_ctx(data, q):
 
 def _horizon(q):
     import re
+    if any(k in q for k in ["那一天", "那天", "这一天"]):   # 指代而非时段
+        return None
     m = re.search(r"(\d+)\s*小时", q)
     if m:
         return max(1, int(round(int(m.group(1)) / 24)))
@@ -444,6 +446,61 @@ def data_source(ctx, q, detail):
     return "数据来源：" + "；".join(kg["data_sources"]) + "。", ["本项目数据管线"]
 
 
+def ops(ctx, q, detail):
+    """运行/实时性元问题：接入 health/ready/versions/verify 的结构化信息。"""
+    try:
+        import store
+    except Exception:  # noqa: BLE001
+        store = None
+    rs = store.get_refresh_state() if store else {}
+    v = (store.list_versions(1) or [{}])[0] if store else {}
+    meta = ctx["data"].get("meta", {}) or {}
+    fetched = meta.get("fetched_at") or meta.get("updated")
+    age = None
+    try:
+        import datetime
+        fdt = datetime.datetime.fromisoformat(str(fetched))
+        now = season.now()
+        if fdt.tzinfo is None:
+            now = now.replace(tzinfo=None)
+        age = round((now - fdt).total_seconds() / 60)
+    except Exception:  # noqa: BLE001
+        pass
+    if any(k in q for k in ["刷新", "更新", "多久", "过期", "数据年龄", "stale", "及时", "实时性"]):
+        stale = (age is not None and age > 60)
+        text = (f"数据抓取时间 {fetched}（约 {age} 分钟前）；刷新状态 {rs.get('status', 'unknown')}"
+                f"（上次成功 {rs.get('last_success') or '—'}）。计划每 3 小时刷新，另有每日 06:00 与外部定时器。")
+        text += " 当前数据可能已过期，请以最新预报与官方预警为准。" if stale else " 数据在新鲜窗口内。"
+        text += f" 线上数据版本 v{v.get('id')}（构建 {v.get('build') or '—'}，上游 {v.get('upstream_url') or '—'}）。"
+        return text, ["运行: refresh_state / data_versions", "口径: 数据抓取时间≠业务日"]
+    if any(k in q for k in ["降级", "断网", "不可用", "离线", "失败"]):
+        return ("上游 Open-Meteo 不可达时：管线跳过抓取并**沿用已有 data.json**（不编造数据）；"
+                "自研问答内部超时（默认 20s）返回安全兜底；来源链会标注数据性质。"
+                "页面在回退数据时显示离线横幅。", ["容错: 跳过抓取/超时降级/来源链标注"])
+    # 提前期误差 / 运行批次 / 血缘
+    text = ""
+    try:
+        import json as _json
+        import os as _os
+        p = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "report", "forecast_verify.json")
+        data = _json.load(open(p, encoding="utf-8"))
+        leads = data.get("leads", [])
+        if leads:
+            lm = "、".join(f"{r['lead']}天 Tmin MAE {r['tmin_mae']}℃" for r in leads)
+            text += f"提前期误差（权威在线）：{lm}。"
+        sp = (data.get("spring", {}) or {}).get("pooled") or {}
+        if sp.get("n"):
+            text += (f"多年春采季霜冻：POD {sp.get('pod')}、FAR {sp.get('far')}、CSI {sp.get('csi')}、"
+                     f"Tmin MAE {sp.get('tmin_mae')}℃（CI {sp.get('tmin_mae_ci95')}），优于持续法 {sp.get('baseline_persist_tmin_mae')}℃。")
+    except Exception:  # noqa: BLE001
+        pass
+    if not text:
+        text = "暂未生成验证报告（可调用 /api/forecast/verify/refresh）。"
+    text += (" 运行批次：Open-Meteo 未提供 run id，本产品记录抓取时间与原始响应 SHA-256"
+             f"（当前 v{v.get('id')} raw {str(v.get('raw_sha256_full') or '—')[:16]}）。")
+    return text, ["验证: report/forecast_verify.json", "血缘: data_versions(raw_sha256_full)"]
+
+
 def model(ctx, q, detail):
     # 证据类追问：直接回答指标口径/误报漏报/局限，不复述宣传模板
     if any(k in q for k in ["误报", "漏报", "准确率", "AUC", "auc", "验证", "指标", "区别", "可信"]):
@@ -647,27 +704,53 @@ def day_detail(ctx, q, detail):
     return text, ["数据: Open-Meteo 逐日+集合（同一目标日口径）", "模型: 复合风险"]
 
 
-def structured_answer(ctx, q):
-    """结构化输出（供 JSON 格式请求）：目标日/时段的字段对象，数值与基础 API 一致。"""
+_FIELD_ALIAS = {"tmin": "tmin", "temp": "tmin", "tmax": "tmax", "rain": "precip", "precip": "precip",
+                "risk": "risk_level", "risk_level": "risk_level", "risk_r": "risk_R", "date": "date",
+                "action": "action", "suitability": "suitability", "p_frost": "p_frost", "p_heat": "p_heat"}
+
+
+def structured_answer(ctx, q, fields=None):
+    """结构化输出（供 JSON 格式请求）：目标日/时段的字段对象；可按用户指定字段裁剪。"""
     d, off = _focus_day(ctx, q)
+
+    def act(day):
+        return day_advice(day, season.is_off())
+
     if d is not None:
-        return {"site": "梅家坞", "season": season.policy()["season"], "date": d["date"],
-                "tmin": d.get("tmin"), "tmax": d.get("tmax"), "precip": d.get("precip"),
+        base = {"date": d["date"], "tmin": d.get("tmin"), "tmax": d.get("tmax"), "precip": d.get("precip"),
                 "p_frost": d.get("p_frost"), "p_heat": d.get("p_heat"),
                 "risk_level": d.get("risk_level"), "risk_R": d.get("risk_R"),
-                "suitability": int(d.get("suitability") or 0)}
-    fc = ctx["fc"][:ctx["H"]]
-    return {"site": "梅家坞", "season": season.policy()["season"],
-            "days": [{"date": x["date"], "tmin": x.get("tmin"), "tmax": x.get("tmax"),
-                      "precip": x.get("precip"), "risk_level": x.get("risk_level"),
-                      "risk_R": x.get("risk_R"), "suitability": int(x.get("suitability") or 0)} for x in fc]}
+                "suitability": int(d.get("suitability") or 0), "action": act(d)}
+        if fields:
+            return {f: base.get(_FIELD_ALIAS.get(f, f)) for f in fields}
+        return {"site": "梅家坞", "season": season.policy()["season"], **base}
+    days = []
+    for x in ctx["fc"][:ctx["H"]]:
+        days.append({"date": x["date"], "tmin": x.get("tmin"), "tmax": x.get("tmax"), "precip": x.get("precip"),
+                     "p_frost": x.get("p_frost"), "p_heat": x.get("p_heat"), "risk_level": x.get("risk_level"),
+                     "risk_R": x.get("risk_R"), "suitability": int(x.get("suitability") or 0), "action": act(x)})
+    if fields:
+        return {"days": [{f: y.get(_FIELD_ALIAS.get(f, f)) for f in fields} for y in days]}
+    return {"site": "梅家坞", "season": season.policy()["season"], "days": days}
+
+
+def markdown_table(rows):
+    """把结构化结果渲染为 Markdown 表格。"""
+    if not rows:
+        return None
+    cols = ["date", "tmax", "tmin", "precip", "risk_level"]
+    labels = {"date": "日期", "tmax": "Tmax", "tmin": "Tmin", "precip": "降水", "risk_level": "风险"}
+    out = "| " + " | ".join(labels[c] for c in cols) + " |\n|" + "---|" * len(cols) + "\n"
+    for r in rows:
+        out += "| " + " | ".join(str(r.get(c)) for c in cols) + " |\n"
+    return out.strip()
 
 
 HANDLERS = {
     "frost": frost, "heat": heat, "drought": drought, "rain": rain,
     "pick_window": pick_window, "schedule": schedule, "decision": decision, "plot": plot,
     "insurance": insurance, "value": value, "harvest_date": harvest_date,
-    "data_source": data_source, "model": model, "greet": greet,
+    "data_source": data_source, "model": model, "greet": greet, "ops": ops,
     "forecast_list": forecast_list, "rain_max": rain_max, "compare": compare,
     "risk_today": None,  # 用下面通用
 }
