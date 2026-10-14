@@ -847,8 +847,12 @@ def _run_verify(days=60):
     try:
         import hashlib
         import forecast_verify as fv
+        _saved = sys.argv
         sys.argv = ["forecast_verify", "--days", str(days)]
-        fv.main()
+        try:
+            fv.main()
+        finally:
+            sys.argv = _saved
         p = VERIFY_JSON
         if os.path.exists(p):
             raw = open(p, "rb").read()
