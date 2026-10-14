@@ -103,7 +103,7 @@ def fetch_archive(start, end):
         "daily": ",".join(DAILY),
         "timezone": TZ,
     }
-    return _get(*_om(url, params))
+    return _get(*_om(url, params), retries=3)   # 归档：限流时较快失败，交由回退处理
 
 
 def fetch_forecast(days=16):
@@ -183,7 +183,31 @@ def main():
                 print("[archive] 抓取失败，回退本地缓存:", e)
                 arc = json.load(open(ap_, encoding="utf-8"))
             else:
-                raise
+                # 无本地缓存（如容器实例轮换）：改由上次构建产物中的历史回退重建，保证刷新不中断
+                _dj = os.path.join(ROOT, "web", "data.json")
+                _hist = None
+                if os.path.exists(_dj):
+                    try:
+                        _dd = json.load(open(_dj, encoding="utf-8"))
+                        _hist = [x for x in _dd.get("days", []) if x.get("source") == "history"]
+                    except Exception:  # noqa: BLE001
+                        _hist = None
+                if not _hist:
+                    raise
+                print("[archive] 抓取失败且无缓存，由上次构建的历史回退重建:", e)
+                _map = {"temperature_2m_max": "tmax", "temperature_2m_min": "tmin", "temperature_2m_mean": "tmean",
+                        "precipitation_sum": "precip", "relative_humidity_2m_mean": "rh",
+                        "et0_fao_evapotranspiration": "et0", "sunshine_duration": "sun_s",
+                        "wind_speed_10m_max": "wind", "soil_moisture_0_to_7cm_mean": "soil",
+                        "shortwave_radiation_sum": None}
+                arc = {"daily": {"time": [x["date"] for x in _hist]}, "_fallback": "from-build"}
+                for k, src in _map.items():
+                    arc["daily"][k] = [x.get(src) if src else None for x in _hist]
+                try:
+                    with open(ap_, "w", encoding="utf-8") as f:
+                        json.dump(arc, f, ensure_ascii=False)
+                except Exception:  # noqa: BLE001
+                    pass
 
     print("[forecast] 未来 16 天")
     fp = os.path.join(RAW, "weather_forecast.json")
