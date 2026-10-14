@@ -165,10 +165,10 @@ def _compare_upstream(force=False):
         r = None
         for i in range(3):
             r = requests.get(url, params=params, timeout=30,
-                             headers={"User-Agent": "TeaWindow/1.0"})
+                             headers={"User-Agent": "TeaWindow/1.0 (AI4Climate Meijiawu tea-garden; contact: 2302372846@qq.com)"})
             if r.status_code != 429:
                 break
-            time.sleep(int(r.headers.get("Retry-After", 0)) or (6 * (i + 1)))
+            _time.sleep(int(r.headers.get("Retry-After", 0)) or (6 * (i + 1)))
         r.raise_for_status()
         up = r.json()["daily"]
         upm = {day: {"tmax": up["temperature_2m_max"][i], "tmin": up["temperature_2m_min"][i],
