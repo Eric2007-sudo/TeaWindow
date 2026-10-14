@@ -555,3 +555,21 @@ def test_metrics_percentiles(monkeypatch):
     c.get("/api/health"); c.get("/api/summary")
     m = c.get("/api/metrics", headers={"X-Admin-Token": "adm"}).json()
     assert "latency_p95_ms" in m and "data_age_minutes" in m
+
+
+# ---------------- 发布一致性自检 / 告警 / 数据血缘 ----------------
+def test_ready_and_alerts():
+    c = _client()
+    r = c.get("/api/ready")
+    assert r.status_code == 200
+    j = r.json()
+    assert "ready" in j and "missing_critical" in j and "route_count" in j
+    a = c.get("/api/alerts")
+    assert a.status_code == 200 and "alerts" in a.json()
+
+
+def test_versions_have_lineage_fields():
+    c = _client()
+    v = c.get("/api/data/versions?limit=1").json()
+    if v["versions"]:
+        assert "raw_sha256" in v["versions"][0]

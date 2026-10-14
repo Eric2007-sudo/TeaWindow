@@ -30,6 +30,26 @@ DAILY = [
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "data", "raw")
+PROC = os.path.join(ROOT, "data", "processed")
+
+
+def _sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(65536), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _now():
+    try:
+        from zoneinfo import ZoneInfo
+        import datetime
+        return datetime.datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:  # noqa: BLE001
+        import datetime
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _get(url, params, retries=3):
@@ -87,10 +107,27 @@ def main():
 
     print("[forecast] 未来 16 天")
     fc = fetch_forecast(16)
-    with open(os.path.join(RAW, "weather_forecast.json"), "w", encoding="utf-8") as f:
+    fp = os.path.join(RAW, "weather_forecast.json")
+    with open(fp, "w", encoding="utf-8") as f:
         json.dump(fc, f, ensure_ascii=False)
     print(f"  预报天数={len(fc.get('daily', {}).get('time', []))}")
-    print("完成 -> data/raw/")
+
+    # 数据版本元数据：上游 URL/参数/原始 SHA-256/抓取时间（供数据血缘与复现）
+    meta = {
+        "fetched_at": _now(),
+        "forecast_url": "https://api.open-meteo.com/v1/forecast",
+        "forecast_params": {"latitude": LAT, "longitude": LON, "forecast_days": 16, "timezone": TZ,
+                            "daily": ",".join(DAILY)},
+        "archive_url": "https://archive-api.open-meteo.com/v1/archive",
+        "archive_params": {"latitude": LAT, "longitude": LON, "start_date": start, "end_date": end, "timezone": TZ},
+        "forecast_raw_sha256": _sha256(fp),
+        "archive_raw_sha256": _sha256(os.path.join(RAW, "weather_archive.json")),
+        "lat": LAT, "lon": LON, "timezone": TZ,
+    }
+    os.makedirs(PROC, exist_ok=True)
+    with open(os.path.join(PROC, "fetch_meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    print("完成 -> data/raw/ + data/processed/fetch_meta.json")
 
 
 if __name__ == "__main__":

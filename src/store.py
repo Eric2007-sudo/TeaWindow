@@ -49,6 +49,11 @@ def _db():
         _conn.execute("""CREATE TABLE IF NOT EXISTS refresh_state(
             k TEXT PRIMARY KEY, ts TEXT, status TEXT, duration_s REAL, error TEXT,
             last_success TEXT, next_planned TEXT)""")
+        for col, typ in (("upstream_url", "TEXT"), ("params", "TEXT"), ("raw_sha256_full", "TEXT")):
+            try:
+                _conn.execute(f"ALTER TABLE data_versions ADD COLUMN {col} {typ}")
+            except Exception:  # noqa: BLE001
+                pass
         _conn.commit()
     return _conn
 
@@ -123,11 +128,12 @@ def save_snapshot(meta, days):
     """meta: {ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,build,note}; days: [{date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level}]"""
     with _LOCK:
         c = _db()
-        cur = c.execute("""INSERT INTO data_versions(ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,n_days,build,note)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        cur = c.execute("""INSERT INTO data_versions(ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,n_days,build,note,upstream_url,params,raw_sha256_full)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (meta.get("ts"), meta.get("source"), meta.get("model"), meta.get("gen_time"),
                          meta.get("fetched_at"), meta.get("lat"), meta.get("lon"), meta.get("raw_sha256"),
-                         len(days), meta.get("build"), meta.get("note")))
+                         len(days), meta.get("build"), meta.get("note"),
+                         meta.get("upstream_url"), meta.get("params"), meta.get("raw_sha256_full")))
         vid = cur.lastrowid
         for d in days:
             c.execute("""INSERT OR REPLACE INTO forecast_days(version_id,date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level)
@@ -141,9 +147,10 @@ def save_snapshot(meta, days):
 def list_versions(limit=20):
     with _LOCK:
         c = _db()
-        rows = c.execute("""SELECT id,ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,n_days,build
+        rows = c.execute("""SELECT id,ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,n_days,build,upstream_url,params,raw_sha256_full
                             FROM data_versions ORDER BY id DESC LIMIT ?""", (max(1, min(limit, 200)),)).fetchall()
-    keys = ("id", "ts", "source", "model", "gen_time", "fetched_at", "lat", "lon", "raw_sha256", "n_days", "build")
+    keys = ("id", "ts", "source", "model", "gen_time", "fetched_at", "lat", "lon", "raw_sha256", "n_days", "build",
+            "upstream_url", "params", "raw_sha256_full")
     return [dict(zip(keys, r)) for r in rows]
 
 

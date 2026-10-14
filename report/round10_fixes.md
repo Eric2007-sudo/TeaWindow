@@ -50,3 +50,9 @@
 - 原始上游响应全量保存与运行批次（Open-Meteo Previous Runs 已可用于提前期误差）；
 - 提前期验证跨 3–5 年并覆盖春采季霜冻事件；物候超越固定日期基线；
 - 多实例/外部数据库、设备签名+nonce、告警通知通道（`/api/alerts`）。
+
+## 九、发布一致性自检 + 告警（本轮补齐第五轮 P0）
+- `GET /api/ready`（ready/build SHA/route_count/missing_critical/age/stale/refresh）与 `GET /api/alerts`（规则化告警）。
+- `src/deploy_check.py`：部署后校验 health/ready(含 build SHA)/OpenAPI 路由数 ≥20/10 个核心接口/alerts，输出 PASS/FAIL 与退出码；`.github/workflows/deploy_check.yml` 每 3 小时自检。
+- 数据血缘增强：`data/processed/fetch_meta.json`（上游 URL/参数/**原始响应 SHA-256**/抓取时间）；版本表增 `upstream_url/params/raw_sha256_full`。
+- 测试 81 → **83**。

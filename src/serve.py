@@ -253,12 +253,22 @@ def _save_snapshot(fetched_at=None, note=""):
                  "risk_R": x.get("risk_R"), "risk_level": x.get("risk_level")}
                 for x in d["days"] if x["source"] == "forecast"]
         raw = json.dumps(days, ensure_ascii=False, sort_keys=True)
+        fm = {}
+        try:
+            fmp = os.path.join(ROOT, "data", "processed", "fetch_meta.json")
+            if os.path.exists(fmp):
+                fm = json.load(open(fmp, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            fm = {}
         meta = {"ts": season.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "source": "Open-Meteo (ERA5 + forecast)", "model": "teawindow-pipeline",
                 "gen_time": d.get("meta", {}).get("updated"),
-                "fetched_at": fetched_at or (d.get("meta", {}) or {}).get("fetched_at") or d.get("meta", {}).get("updated"),
+                "fetched_at": fetched_at or fm.get("fetched_at") or (d.get("meta", {}) or {}).get("fetched_at") or d.get("meta", {}).get("updated"),
                 "lat": d.get("meta", {}).get("lat"), "lon": d.get("meta", {}).get("lon"),
                 "raw_sha256": hashlib.sha256(raw.encode()).hexdigest()[:16],
+                "raw_sha256_full": fm.get("forecast_raw_sha256"),
+                "upstream_url": fm.get("forecast_url"),
+                "params": json.dumps(fm.get("forecast_params"), ensure_ascii=False) if fm else None,
                 "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
                 "note": note}
         store.save_snapshot(meta, days)
@@ -824,6 +834,55 @@ def phenology_validation():
     if not os.path.exists(p):
         return {"status": "pending"}
     return {"status": "ready", "report": open(p, encoding="utf-8").read()}
+
+
+# ---- 发布一致性自检 + 告警（第五轮 P0） ----
+CRITICAL_ROUTES = ["/api/health", "/api/summary", "/api/days", "/api/ask", "/api/realtime",
+                   "/api/data/versions", "/api/forecast/verify", "/api/updates", "/api/ready", "/api/alerts"]
+
+
+def _api_routes():
+    return sorted({getattr(r, "path", "") for r in app.routes if str(getattr(r, "path", "")).startswith("/api/")})
+
+
+@app.get("/api/ready")
+def ready():
+    """发布就绪自检：build + 路由完整 + 数据可用 + 非陈旧。"""
+    has_data = os.path.exists(DATA_JSON)
+    fr = _freshness() if has_data else {}
+    routes = _api_routes()
+    missing = [p for p in CRITICAL_ROUTES if p not in routes]
+    ok = has_data and not missing and (fr.get("stale") is not True)
+    return {"ready": ok, "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
+            "route_count": len(routes), "critical_total": len(CRITICAL_ROUTES),
+            "missing_critical": missing, "data_ready": has_data,
+            "age_minutes": fr.get("age_minutes"), "stale": fr.get("stale"),
+            "refresh": fr.get("refresh"), "server_time": season.now().isoformat(timespec="seconds")}
+
+
+@app.get("/api/alerts")
+def alerts():
+    """规则化告警（公开只读，仅状态码/级别，不含隐私）。"""
+    out = []
+    try:
+        fr = _freshness() if os.path.exists(DATA_JSON) else {}
+        if fr.get("stale"):
+            out.append({"level": "warn", "code": "data_stale",
+                        "msg": f"数据约 {fr.get('age_minutes')} 分钟前获取，可能已过期"})
+        rs = store.get_refresh_state()
+        if rs.get("status") == "error":
+            out.append({"level": "error", "code": "refresh_failed", "msg": str(rs.get("error"))[:160]})
+        if _METRICS["errors"] > 0:
+            out.append({"level": "warn", "code": "server_error", "msg": f"5xx 累计 {_METRICS['errors']}"})
+        if _llm_usage["count"] >= LLM_DAILY_BUDGET:
+            out.append({"level": "warn", "code": "llm_budget", "msg": "LLM 每日预算已用尽"})
+        if store.sensor_count() == 0:
+            out.append({"level": "info", "code": "no_sensors", "msg": "尚未接入现场传感器"})
+        if store.version_count() == 0:
+            out.append({"level": "info", "code": "no_versions", "msg": "暂无数据版本快照"})
+    except Exception as e:  # noqa: BLE001
+        out.append({"level": "error", "code": "alerts_error", "msg": repr(e)})
+    return {"alerts": out, "count": len(out), "server_time": season.now().isoformat(timespec="seconds")}
 
 
 # 静态站点挂到最后，"/" 作为兜底（API 路由优先）
