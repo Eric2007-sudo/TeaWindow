@@ -66,13 +66,15 @@ def _now():
         return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _get(url, params, retries=5):
+def _get(url, params, retries=5, fast429=False):
     last = None
     for i in range(retries):
         try:
             r = requests.get(url, params=params, timeout=60,
                              headers={"User-Agent": "TeaWindow/1.0"})
             if r.status_code == 429:
+                if fast429:
+                    raise RuntimeError("429 Too Many Requests")
                 wait = int(r.headers.get("Retry-After", 0)) or (8 * (i + 1))
                 print(f"  [fetch] 429 限流，等待 {wait}s 重试 ({i+1}/{retries})")
                 time.sleep(min(wait, 90))
@@ -82,6 +84,8 @@ def _get(url, params, retries=5):
             return r.json()
         except Exception as e:  # noqa: BLE001
             last = e
+            if fast429:
+                raise
             time.sleep(2 + i * 3)
     raise RuntimeError(f"请求失败: {last}")
 
@@ -106,7 +110,7 @@ def fetch_forecast(days=16):
         "forecast_days": days,
         "timezone": TZ,
     }
-    return _get(*_om(url, params))
+    return _get(*_om(url, params), fast429=True)   # 429 快速失败 → 立即切备用源
 
 
 def fetch_forecast_metno(days=16):
@@ -157,25 +161,40 @@ def main():
         end = sys.argv[2]
 
     forecast_only = os.environ.get("TW_FETCH_FORECAST_ONLY") == "1"
-    if forecast_only and os.path.exists(os.path.join(RAW, "weather_archive.json")):
+    ap_ = os.path.join(RAW, "weather_archive.json")
+    if forecast_only and os.path.exists(ap_):
         print("[archive] 轻量刷新：沿用已有历史（跳过 archive 抓取）")
         arc = {"daily": {"time": []}}
     else:
-        print(f"[archive] {start} ~ {end} @ ({LAT},{LON})")
-        arc = fetch_archive(start, end)
-        with open(os.path.join(RAW, "weather_archive.json"), "w", encoding="utf-8") as f:
-            json.dump(arc, f, ensure_ascii=False)
-        n = len(arc.get("daily", {}).get("time", []))
-        print(f"  历史天数={n}")
+        try:
+            print(f"[archive] {start} ~ {end} @ ({LAT},{LON})")
+            arc = fetch_archive(start, end)
+            with open(ap_, "w", encoding="utf-8") as f:
+                json.dump(arc, f, ensure_ascii=False)
+            n = len(arc.get("daily", {}).get("time", []))
+            print(f"  历史天数={n}")
+        except Exception as e:  # noqa: BLE001
+            if os.path.exists(ap_):
+                print("[archive] 抓取失败，回退本地缓存:", e)
+                arc = json.load(open(ap_, encoding="utf-8"))
+            else:
+                raise
 
     print("[forecast] 未来 16 天")
     fp = os.path.join(RAW, "weather_forecast.json")
     src = "open-meteo"
     fc = None
-    try:
-        fc = fetch_forecast(16)
-    except Exception as e:  # noqa: BLE001
-        print("  [forecast] Open-Meteo 失败:", e)
+    _force = os.environ.get("FORECAST_SOURCE", "auto")
+    if _force == "metno":
+        try:
+            fc = fetch_forecast_metno(16); src = "met.no"; print("  [forecast] 指定首选 MET Norway")
+        except Exception as e:  # noqa: BLE001
+            print("  [forecast] MET Norway 失败:", e)
+    if fc is None and _force != "metno":
+        try:
+            fc = fetch_forecast(16)
+        except Exception as e:  # noqa: BLE001
+            print("  [forecast] Open-Meteo 失败:", e)
     if fc is None:
         try:
             fc = fetch_forecast_metno(16)
