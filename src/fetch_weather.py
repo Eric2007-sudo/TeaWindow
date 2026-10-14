@@ -93,9 +93,11 @@ def main():
     os.makedirs(RAW, exist_ok=True)
     end = (date.today() - timedelta(days=2)).isoformat()
     start = "2015-01-01"
-    if len(sys.argv) > 1:
+    import re as _re
+    _isdate = lambda s: bool(_re.fullmatch(r"\d{4}-\d{2}-\d{2}", s or ""))
+    if len(sys.argv) > 1 and _isdate(sys.argv[1]):
         start = sys.argv[1]
-    if len(sys.argv) > 2:
+    if len(sys.argv) > 2 and _isdate(sys.argv[2]):
         end = sys.argv[2]
 
     print(f"[archive] {start} ~ {end} @ ({LAT},{LON})")

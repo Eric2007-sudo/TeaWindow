@@ -286,6 +286,8 @@ def _refresh(do_fetch=True):
     if not _refresh_lock.acquire(blocking=False):
         return {"status": "busy"}
     t0 = _time.time()
+    _saved_argv = sys.argv
+    sys.argv = ["pipeline"]   # 避免 uvicorn 命令行参数污染下游模块（如 fetch_weather 读 argv 当日期）
     try:
         import pipeline
         pipeline.run(do_fetch=do_fetch, do_ndvi=do_fetch, do_figs=False, do_reports=False)
@@ -299,6 +301,7 @@ def _refresh(do_fetch=True):
                                 next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
         raise
     finally:
+        sys.argv = _saved_argv
         _refresh_lock.release()
 
 

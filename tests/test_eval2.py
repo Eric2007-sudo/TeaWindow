@@ -842,3 +842,28 @@ def test_stale_degrades_action():
     # 本地数据 fetched_at 通常已 >60 分钟 → 应出现"可能过期"降级提示
     r = e.answer("要不要浇水")
     assert ("可能过期" in r["text"]) or ("测墒" in r["text"])
+
+
+def test_refresh_guards_uvicorn_argv(monkeypatch):
+    """Render 以 uvicorn 启动会污染 sys.argv；刷新不得把 argv 当日期。"""
+    import sys
+    import types
+    import serve
+    called = {}
+
+    def run(**kw):
+        called.update(kw)
+        called["argv"] = list(sys.argv)
+
+    stub = types.ModuleType("pipeline")
+    stub.run = run
+    monkeypatch.setitem(sys.modules, "pipeline", stub)
+    monkeypatch.setattr(serve, "_save_snapshot", lambda **kw: None)
+    orig = list(sys.argv)
+    sys.argv = ["uvicorn", "src.serve:app", "--host", "0.0.0.0", "--port", "10000"]
+    try:
+        r = serve._refresh(False)
+        assert r["status"] == "ok"
+        assert called.get("argv") == ["pipeline"]
+    finally:
+        sys.argv = orig
