@@ -5,9 +5,11 @@
   const log = $("#log");
   const input = $("#q");
   const sendBtn = $("#send");
-  const messages = [];           // 多轮上下文（刷新即清零）
-  let state = {};                // 结构化会话槽位（实体/格式/否定）
+  const messages = [];           // 多轮上下文（持久化到 localStorage，刷新不丢）
+  let state = {};                // 结构化会话槽位（实体/格式/否定/摘要）
   let busy = false;
+  const LS = "tw_chat_v1";
+  const MEM_WINDOW = 10;         // 记忆窗口≈10 条消息
 
   function nowHM() {
     try {
@@ -71,8 +73,12 @@
     else { add(q, "me"); }
 
     const engine = $("#enh").checked ? "llm" : "own";
-    const history = messages.slice(-8);
+    const history = messages.slice(-MEM_WINDOW);
+    const older = messages.slice(0, -MEM_WINDOW).filter((m) => m.role === "user").map((m) => m.content).join("；");
+    const st = Object.assign({}, state);
+    if (older) st.summary = older.slice(-220);
     messages.push({ role: "user", content: q });
+    try { localStorage.setItem(LS, JSON.stringify({ messages: messages.slice(-20), state: st })); } catch (e) { /* ignore */ }
 
     const typing = document.createElement("div");
     typing.className = "typing";
@@ -86,7 +92,7 @@
       const r = await fetch("api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, engine: engine, history: history, state: state }),
+        body: JSON.stringify({ question: q, engine: engine, history: history, state: st }),
         signal: ctrl.signal,
       });
       clearTimeout(timer);
@@ -110,6 +116,7 @@
       const meta = label + be + (d.intent ? "　意图：" + d.intent + "（置信 " + d.confidence + "）" + (d.follow_up ? " · 追问" : "") : "");
       add(d.text, "bot", meta, d.chain);
       messages.push({ role: "assistant", content: d.text });
+      try { localStorage.setItem(LS, JSON.stringify({ messages: messages.slice(-20), state: state })); } catch (e) { /* ignore */ }
     } catch (e) {
       typing.remove();
       const msg = (e && e.name === "AbortError") ? "请求超时，请重试。" : "网络异常或服务不可用，请检查网络后重试。";
@@ -128,7 +135,19 @@
     // 中文输入法组合期间不提交
     if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
   });
-  $("#clear").onclick = () => { log.innerHTML = ""; messages.length = 0; state = {}; input.focus(); };
+  $("#clear").onclick = () => { log.innerHTML = ""; messages.length = 0; state = {}; try { localStorage.removeItem(LS); } catch (e) { /* ignore */ } input.focus(); };
+
+  // 恢复上次会话（记忆窗口≈10 条的工作基础）
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS) || "null");
+    if (saved && Array.isArray(saved.messages)) {
+      saved.messages.forEach((m) => {
+        if (m && typeof m.content === "string") add(m.content, m.role === "user" ? "me" : "bot", m.role === "assistant" ? "历史" : "");
+      });
+      messages.push(...saved.messages);
+      state = saved.state || {};
+    }
+  } catch (e) { /* ignore */ }
 
   // 欢迎状态：当前数据状态 + 能力边界（评估：聊天初始区域不应为空）
   (async function welcome() {

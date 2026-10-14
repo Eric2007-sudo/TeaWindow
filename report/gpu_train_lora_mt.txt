@@ -1,0 +1,11 @@
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+trainable params: 8,798,208 || all params: 502,830,976 || trainable%: 1.7497
+BASE multi-turn fact_recall=0.6914
+/home/eric/teacloud/train_lora_multiturn.py:135: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss) * a.acc
+[W1014 13:56:38.887134576 CUDACachingAllocator.cpp:3934] memory allocation failed with OOM on device 0 while trying to allocate 1153433600 bytes (free: 1060175872, total: 25252724736).
+epoch 1/2 loss 0.0682
+epoch 2/2 loss 0.0185
+LORA multi-turn fact_recall=0.8488 (base 0.6914)
+saved -> /home/eric/teacloud/models/qa_mt_lora

@@ -719,6 +719,13 @@ def test_followup_relative_day_not_overridden():
     assert d in r["text"]
 
 
+def test_rolling_summary_memory():
+    import qa.engine as e
+    # 无最近一条 user 时，用滚动摘要回答"我问了什么"
+    r = e.answer("刚刚我问了什么", state={"summary": "之前问过：要不要防冻"})
+    assert r["intent"] == "memory" and "摘要" in r["text"]
+
+
 def test_forecast_compare_endpoint():
     c = _client()
     r = c.get("/api/forecast/compare")

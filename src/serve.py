@@ -462,8 +462,8 @@ class HistoryMessage(BaseModel):
 class AskReq(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     engine: str = "own"   # own=自研引擎(默认)；llm=DeepSeek 可选增强
-    history: list[HistoryMessage] = Field(default_factory=list, max_length=20)
-    state: dict | None = None   # 结构化会话槽位（active_date/format/negated…）
+    history: list[HistoryMessage] = Field(default_factory=list, max_length=24)
+    state: dict | None = None   # 结构化会话槽位（active_date/format/negated/summary…）
 
     @field_validator("question", mode="before")
     @classmethod
@@ -536,7 +536,7 @@ def ask(request: Request, req: AskReq):
     if req.engine == "llm":
         _rate_limit("llm:" + ip, limit=int(os.environ.get("LLM_RPM", "8")))
     _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
-    hist = [{"role": m.role, "content": m.content[:500]} for m in req.history[-8:]]
+    hist = [{"role": m.role, "content": m.content[:500]} for m in req.history[-10:]]   # 记忆窗口≈10 条
     return _ask(req.question.strip(), req.engine, hist, req.state)
 
 
