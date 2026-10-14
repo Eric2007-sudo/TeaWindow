@@ -144,6 +144,7 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 - **一键打包**：`dist/TeaWindow_v1.3.zip`；**GitHub Release**：https://github.com/Eric2007-sudo/TeaWindow/releases/tag/v1.3
 - **测试与 CI**：`tests/`（pytest，**103 passed**）、`.github/workflows/test.yml`
 - **发布一致性自检**：`src/deploy_check.py`、`.github/workflows/deploy_check.yml`、`/api/ready`、`/api/alerts`
+- **持久化（已接入）**：Render Postgres + `DATABASE_URL`；`/api/persistence`；`src/persistence_check.py`（跨重部署保留验收 PASS）
 - **外部定时器**：`.github/workflows/verify.yml`（每 6h 触发验证刷新）；`.github/workflows/refresh.yml`（每日刷新）
 - **质量整改（对照四轮评测）**：`submit/13_评估整改说明.md`、`report/round7_fixes.md`、`report/round8_fixes.md`
   （统一季节策略 + 北京时间、日期槽位/目标日一致、history 强类型、输出完整性、灌溉先测墒、数据权威深答）
