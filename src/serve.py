@@ -54,6 +54,13 @@ async def _lifespan(app):  # noqa: ARG001
         print("[serve] 模型预热完成")
     except Exception as e:  # noqa: BLE001
         print("[serve] 模型预热跳过:", e)
+    # 若尚无数据版本，启动时落一个初始快照（数据血缘）
+    try:
+        if store.version_count() == 0 and os.path.exists(DATA_JSON):
+            _save_snapshot()
+            print("[serve] 初始数据版本已记录")
+    except Exception as e:  # noqa: BLE001
+        print("[serve] 初始快照跳过:", e)
     yield
 
 
