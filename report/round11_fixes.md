@@ -36,3 +36,8 @@
 - **冷/热延迟分桶**：`/api/metrics` 增 `cold_p95_ms / hot_p95_ms / uptime_s`（启动 90s 内为冷）。
 - **持久化自检**：`GET /api/persistence`（公开只读）返回 db 方言、`external_configured`、各表计数与 `retention_hint`；已纳入 `deploy_check`。
 - 主页预报表排除过去日期；聊天欢迎态显示数据年龄与传感器状态。
+
+## 七、线上实测缺陷（对话记忆 / 追问日期）
+- **对话记忆**：新增 `memory` 处理 —— "刚刚我问了什么 / 你的上一条回答是什么" 直接返回上一轮用户问题或上一轮回答（history 由前端携带；无历史时说明"第一轮"）。
+- **追问日期优先级**：修复"明天→后天呢"被上一轮"明天"覆盖成 10-15 的问题；本轮相对日期（明天/后天/第N天）解析为**绝对日期注入**，优先级最高。线上实测 `后天呢` → **2026-10-16**。
+- 证据：`test_memory_questions`、`test_followup_relative_day_not_overridden`。

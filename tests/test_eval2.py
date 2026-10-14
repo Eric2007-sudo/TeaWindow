@@ -697,6 +697,28 @@ def test_cancel_command():
     assert r["intent"] == "cancel" and "取消" in r["text"]
 
 
+def test_memory_questions():
+    import qa.engine as e
+    h = [{"role": "user", "content": "明天有风险吗"},
+         {"role": "assistant", "content": "明天（2026-10-15）：风险 低（R=0.0，适宜度 53）。"}]
+    r = e.answer("刚刚我问了什么", history=h)
+    assert r["intent"] == "memory" and "明天有风险吗" in r["text"]
+    r2 = e.answer("你的上一条回答是什么", history=h)
+    assert r2["intent"] == "memory" and "明天" in r2["text"]
+    r3 = e.answer("刚刚我问了什么")
+    assert r3["intent"] == "memory" and "第一轮" in r3["text"]
+
+
+def test_followup_relative_day_not_overridden():
+    import qa.engine as e
+    h = [{"role": "user", "content": "明天有风险吗"},
+         {"role": "assistant", "content": "明天（2026-10-15）：风险 低。"}]
+    r = e.answer("后天呢", history=h)
+    import datetime
+    d = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+    assert d in r["text"]
+
+
 def test_forecast_compare_endpoint():
     c = _client()
     r = c.get("/api/forecast/compare")

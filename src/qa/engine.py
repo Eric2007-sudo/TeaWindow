@@ -487,7 +487,7 @@ def answer(question, context=None, history=None, state=None):
             if tbl:
                 r["text"] = tbl
                 r["format"] = "table"
-        if isinstance(r.get("text"), str) and r.get("format") not in ("json", "table") and r.get("intent") != "cancel":
+        if isinstance(r.get("text"), str) and r.get("format") not in ("json", "table") and r.get("intent") not in ("cancel", "memory"):
             r["text"] = _final_guard(q, r["text"])
         r["state"] = st
     except Exception:  # noqa: BLE001
@@ -531,6 +531,19 @@ def _answer_impl(question, context=None, history=None, state=None):
     if q0 in CONTINUE and not prev:
         return _reply("请先告诉我想了解哪方面（如：今天风险、要不要防冻、先采哪块地），我再继续。")
 
+    # 对话记忆：直接回答"刚刚我问了什么 / 你刚才回答了什么"（history 由前端携带）
+    if prev and any(k in question for k in ["刚刚我问", "我刚才问", "我刚才说", "上一个问题", "上一轮问",
+                                            "我之前问", "我问了什么", "刚问了什么", "前面的问题", "上一个问"]):
+        return _reply(f"你上一条问的是：「{prev}」。", intent="memory", chain=["会话记忆: 上一轮用户问题"])
+    if prev_assistant and any(k in question for k in ["上一条回答", "上一个回答", "刚才回答", "你刚说", "你说了什么",
+                                                      "刚刚回答了什么", "你的上一条回答"]):
+        tail = "…" if len(prev_assistant) > 140 else ""
+        return _reply("我上一条回答是：「" + prev_assistant[:140] + tail + "」。", intent="memory",
+                      chain=["会话记忆: 上一轮回答"])
+    if any(k in question for k in ["刚刚我问", "我刚才问", "我问了什么", "上一个问题"]) and not prev:
+        return _reply("这是第一轮，你还没有问过上一个问题。可以问我：今天有风险吗 / 要不要防冻 / 先采哪块地。",
+                      intent="memory")
+
     state = dict(state or {})
     active_date = state.get("active_date")
     mrel = re.search(r"(前一天|前一日|昨天|昨日|前日)", question)
@@ -572,6 +585,19 @@ def _answer_impl(question, context=None, history=None, state=None):
     qt = question
     if (is_follow or pronoun) and prev:
         qt = question + " " + prev
+    # 本轮若含相对日期（明天/后天/第N天），以本轮为准（避免被上一轮的"明天"覆盖成"后天"）
+    try:
+        from . import nlg as _nq
+        _off_q = _nq._day_offset(question)
+    except Exception:  # noqa: BLE001
+        _off_q = None
+    if _off_q is not None:
+        try:
+            target_q = (season.today() + datetime.timedelta(days=int(_off_q))).isoformat()
+            qt = question + " " + target_q + ((" " + prev) if prev else "")
+            state["active_date"] = target_q
+        except Exception:  # noqa: BLE001
+            pass
     if carry and (is_follow or pronoun):
         qt = qt + " " + carry
     qt_s = _strip_negations(qt)
