@@ -66,6 +66,12 @@ async def _lifespan(app):  # noqa: ARG001
                 store.set_refresh_state("startup", 0.0)
         except Exception as e:  # noqa: BLE001
             print("[serve] 初始快照状态跳过:", e)
+        # 预热上游漂移比对（否则部署后 /api/ready 会因 compare_not_run 短暂非就绪）
+        try:
+            _compare_upstream(force=True)
+            print("[serve] 上游漂移比对预热完成")
+        except Exception as e:  # noqa: BLE001
+            print("[serve] 比对预热跳过:", e)
 
     threading.Thread(target=_boot_tasks, daemon=True).start()   # 后台预热，避免阻塞启动/健康检查
     yield
@@ -346,6 +352,10 @@ def _refresh(do_fetch=True, light=True):
             store.set_data_json(json.loads(blob).get("meta", {}).get("updated") or season.now().strftime("%Y-%m-%d %H:%M:%S"), blob)
         except Exception as e:  # noqa: BLE001
             print("[serve] data.json 入库跳过:", e)
+        try:   # 刷新后立即重跑漂移比对，保证 decision_ready 就绪
+            _compare_upstream(force=True)
+        except Exception as e:  # noqa: BLE001
+            print("[serve] 刷新后比对跳过:", e)
         store.set_refresh_state("ok", round(_time.time() - t0, 1),
                                 next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
         return {"status": "ok"}
