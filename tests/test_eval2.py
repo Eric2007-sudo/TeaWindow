@@ -794,8 +794,10 @@ def test_device_signature_bad_and_stale(monkeypatch):
 
 def test_nonce_dedup_store():
     import store
-    assert store.use_nonce("n-uniq-test-1", "d1") is True
-    assert store.use_nonce("n-uniq-test-1", "d1") is False
+    import uuid
+    n = "n-" + uuid.uuid4().hex
+    assert store.use_nonce(n, "d1") is True
+    assert store.use_nonce(n, "d1") is False
 
 
 def test_credibility_question_not_hijacked():
@@ -807,3 +809,36 @@ def test_credibility_question_not_hijacked():
     assert "可信度" in r["text"]
     assert e.answer("这些数据可靠吗")["intent"] == "data_source"
     assert e.answer("准不准")["intent"] == "model"
+
+
+def test_relative_dates_longest_match_and_next():
+    import datetime
+    import qa.engine as e
+    today = datetime.date.today()
+    assert (today + datetime.timedelta(days=3)).isoformat() in e.answer("大后天呢")["text"]
+    assert (today + datetime.timedelta(days=2)).isoformat() in e.answer("后天呢")["text"]
+
+
+def test_json_format_carries_across_turns():
+    import json
+    import qa.engine as e
+    r1 = e.answer("2026-10-20 用JSON返回，字段为 date,tmin,rain,risk,action", state={"format": "json"})
+    st = r1["state"]
+    r2 = e.answer("下一天也用相同字段", state=st)
+    obj = json.loads(r2["text"])
+    assert set(obj.keys()) == {"date", "tmin", "rain", "risk", "action"}
+    assert obj["date"] == "2026-10-21"
+
+
+def test_ops_lineage_alerts_verify():
+    import qa.engine as e
+    assert e.answer("当前告警与最近投递")["intent"] == "ops"
+    assert e.answer("3天预测误差和运行批次")["intent"] == "ops"
+    assert "验证历史" in e.answer("最近两次验证时间与样本")["text"] or "仅" in e.answer("最近两次验证时间与样本")["text"]
+
+
+def test_stale_degrades_action():
+    import qa.engine as e
+    # 本地数据 fetched_at 通常已 >60 分钟 → 应出现"可能过期"降级提示
+    r = e.answer("要不要浇水")
+    assert ("可能过期" in r["text"]) or ("测墒" in r["text"])

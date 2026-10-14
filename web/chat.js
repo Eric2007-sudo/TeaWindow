@@ -149,20 +149,8 @@
     }
   } catch (e) { /* ignore */ }
 
-  // 欢迎状态：当前数据状态 + 能力边界（评估：聊天初始区域不应为空）
-  (async function welcome() {
-    let s = "";
-    try {
-      const r = await fetch("api/summary", { cache: "no-store" });
-      if (r.ok) {
-        const d = await r.json();
-        s = "｜当前数据日 " + (d.current ? d.current.date : "–") + "，风险 " + (d.current ? d.current.risk_level : "–") +
-            "，季节 " + (d.season === "off" ? "非春采期（养护为主）" : "春采季");
-        if (d.age_minutes != null) s += "，数据约 " + Math.round(d.age_minutes) + " 分钟前获取" + (d.stale ? "（可能过期）" : "");
-      }
-      const rr = await fetch("api/realtime", { cache: "no-store" });
-      if (rr.ok) { const rj = await rr.json(); s += rj.n ? "，现场传感器 " + rj.n + " 条" : "，尚未接入现场传感器"; }
-    } catch (e) { s = "｜（未连接到实时服务）"; }
-    add("你好，我是梅坞采候助手。我能回答：风险、霜冻/高温、干旱/灌溉、连雨、采摘窗口、地块、保险与损失、开采期、数据与模型说明；非茶园问题我会拒答。" + s + "。点下方快捷问题即可开始。", "bot", "欢迎 · 能力边界");
-  })();
+  // 仅在没有历史时显示欢迎（避免追加到恢复历史末尾）
+  if (!messages.length) {
+    add("你好，我是梅坞采候助手。我能回答：风险、霜冻/高温、干旱/灌溉、连雨、采摘窗口、地块、保险与损失、开采期、数据与模型说明；非茶园问题我会拒答。点下方快捷问题即可开始。", "bot", "欢迎 · 能力边界");
+  }
 })();

@@ -357,8 +357,10 @@ def get_refresh_state():
     with _LOCK:
         row = _db().execute("SELECT ts,status,duration_s,error,last_success,next_planned FROM refresh_state WHERE k='main'").fetchone()
     if not row:
-        return {"status": "unknown", "last_success": None}
-    return dict(zip(("ts", "status", "duration_s", "error", "last_success", "next_planned"), row))
+        return {"status": "unknown", "last_success": None, "last_error": None, "next_retry": None}
+    ts, status, dur, error, last_success, next_planned = row
+    return {"status": status, "last_success": last_success, "last_error": error,
+            "next_retry": next_planned, "ts": ts, "duration_s": dur}
 
 
 # ---------------- 验证运行归档 + 告警通知状态 ----------------

@@ -75,7 +75,8 @@ def _parse_abs_date(q):
 
 
 def _day_offset(q):
-    for k, v in [("今天", 0), ("今日", 0), ("明天", 1), ("明日", 1), ("后天", 2), ("大后天", 3)]:
+    # 最长词优先：大后天 > 后天 > 明天/今日
+    for k, v in [("大后天", 3), ("后天", 2), ("明天", 1), ("明日", 1), ("今天", 0), ("今日", 0)]:
         if k in q:
             return v
     import re
@@ -484,6 +485,29 @@ def ops(ctx, q, detail):
         return ("上游 Open-Meteo 不可达时：管线跳过抓取并**沿用已有 data.json**（不编造数据）；"
                 "自研问答内部超时（默认 20s）返回安全兜底；来源链会标注数据性质。"
                 "页面在回退数据时显示离线横幅。", ["容错: 跳过抓取/超时降级/来源链标注"])
+    if any(k in q for k in ["血缘", "版本", "版本号", "URL", "url", "参数", "SHA", "sha", "构建", "build"]):
+        if v:
+            return (f"最新数据版本 v{v.get('id')}：上游 {v.get('upstream_url') or '—'}；参数 {v.get('params') or '—'}；"
+                    f"完整 SHA-256 {v.get('raw_sha256_full') or '—'}；快照hash {v.get('raw_sha256') or '—'}；"
+                    f"抓取 {v.get('fetched_at') or '—'}；构建 {v.get('build') or '—'}；天数 {v.get('n_days')}。",
+                    ["血缘: data_versions"])
+        return "暂无数据版本记录。", ["血缘: data_versions"]
+    if any(k in q for k in ["告警", "通知", "送达", "投递", "webhook"]):
+        ls = store.get_alerts_state() if store else {}
+        ld = store.last_alert_delivery() if store else None
+        txt = f"当前告警去重状态：{ls.get('codes') or []}（时间 {ls.get('ts') or '—'}）。"
+        txt += ("最近一次投递：" + __import__("json").dumps(ld, ensure_ascii=False)) if ld else \
+            "尚无投递记录（webhook 未配置时不会外送）。"
+        return txt, ["运行: alerts_state / alert_deliveries"]
+    if any(k in q for k in ["相差", "信谁", "上游差异", "漂移", "compare", "差异"]):
+        return ("若与上游最新预报相差 ≥3℃ 或 ≥5mm，视为**决策级漂移**：请以最新预报与官方预警为准，"
+                "并停止依据旧快照的行动建议；可查看 /api/forecast/compare。", ["口径: change-warning 阈值 3℃/5mm"])
+    if any(k in q for k in ["最近两次", "两次", "验证历史", "验证时间", "样本数"]):
+        runs = store.list_verifications(5) if store else []
+        if len(runs) < 2:
+            return (f"验证历史目前仅 **{len(runs)} 次**运行（不足两次，无法比较稳定性）；最近一次："
+                    + (__import__("json").dumps(runs[0], ensure_ascii=False) if runs else "无")
+                    + "。可调用 /api/forecast/verify/refresh 触发。", ["验证: 诚实说明样本不足"])
     # 提前期误差 / 运行批次 / 血缘
     text = ""
     try:
@@ -741,15 +765,16 @@ def structured_answer(ctx, q, fields=None):
     return {"site": "梅家坞", "season": season.policy()["season"], "days": days}
 
 
-def markdown_table(rows):
-    """把结构化结果渲染为 Markdown 表格。"""
+def markdown_table(rows, fields=None):
+    """把结构化结果渲染为 Markdown 表格；fields 指定列（用户要求的字段）。"""
     if not rows:
         return None
-    cols = ["date", "tmax", "tmin", "precip", "risk_level"]
-    labels = {"date": "日期", "tmax": "Tmax", "tmin": "Tmin", "precip": "降水", "risk_level": "风险"}
-    out = "| " + " | ".join(labels[c] for c in cols) + " |\n|" + "---|" * len(cols) + "\n"
+    labels = {"date": "日期", "tmax": "Tmax", "tmin": "Tmin", "precip": "降水", "rain": "降水",
+              "risk_level": "风险", "risk": "风险", "action": "行动", "suitability": "适宜度"}
+    cols = fields or ["date", "tmax", "tmin", "precip", "risk_level"]
+    out = "| " + " | ".join(labels.get(c, c) for c in cols) + " |\n|" + "---|" * len(cols) + "\n"
     for r in rows:
-        out += "| " + " | ".join(str(r.get(c)) for c in cols) + " |\n"
+        out += "| " + " | ".join(str(r.get(_FIELD_ALIAS.get(c, c))) for c in cols) + " |\n"
     return out.strip()
 
 
@@ -763,6 +788,36 @@ HANDLERS = {
 }
 
 
+def _stale_age(data):
+    """返回数据年龄（分钟），若 >60 则视为陈旧；否则 None。"""
+    try:
+        meta = (data or {}).get("meta", {}) or {}
+        fetched = meta.get("fetched_at") or meta.get("updated")
+        import datetime
+        fdt = datetime.datetime.fromisoformat(str(fetched))
+        now = season.now()
+        if fdt.tzinfo is None:
+            now = now.replace(tzinfo=None)
+        age = (now - fdt).total_seconds() / 60.0
+        return round(age) if age > 60 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+_DEGRADE_REPL = [("建议先测量根层墒情，暂不直接灌溉", "请先测墒并核验最新预报后再决定是否补水"),
+                 ("该浇一次水了", "核验后再考虑补水"), ("建议灌溉", "核验后再考虑灌溉"), ("要补水", "核验后再考虑补水"),
+                 ("建议遮阳", "核验后再考虑遮阳"), ("要防冻", "关注低温、核验后再防冻"), ("建议提前防冻", "核验后再防冻"),
+                 ("需重点防冻", "核验后再防冻"), ("按一芽一叶标准采", "核验后再安排采"), ("达标芽先抢采", "核验后再安排采"),
+                 ("达标芽叶优先抢采", "核验后再安排")]
+
+
+def _degrade(text, age):
+    head = f"⚠️ 数据约 {age} 分钟前获取（可能过期）：以下仅为参考，请先核验最新预报与上游差异后再行动。"
+    for a, b in _DEGRADE_REPL:
+        text = text.replace(a, b)
+    return head + text
+
+
 def compose(intent, q, sl, data):
     ctx = classify_ctx(data, q)
     detail = want_detail(q)
@@ -771,7 +826,11 @@ def compose(intent, q, sl, data):
     if not _other and _asks_fields(q) and (_parse_abs_date(q) or _day_offset(q) or _horizon(q)):
         dd = day_detail(ctx, q, detail)
         if dd is not None:
-            return {"text": season.clean_text(dd[0]), "chain": dd[1], "detail": detail}
+            t, ch = dd
+            age = _stale_age(data)
+            if age is not None:
+                t, ch = _degrade(t, age), list(ch) + ["时效: 数据可能过期(降级为核验)"]
+            return {"text": season.clean_text(t), "chain": ch, "detail": detail}
     if intent in HANDLERS and HANDLERS[intent]:
         text, chains = HANDLERS[intent](ctx, q, detail)
     elif intent == "risk_today":
@@ -818,4 +877,8 @@ def compose(intent, q, sl, data):
         chains = ["数据: Open-Meteo+Meteostat", "风险: 专家规则R（展示值）；模型: GBDT概率(辅助)"]
     else:
         text, chains = fallback(ctx, q, detail)
+    age = _stale_age(data)
+    if age is not None:
+        text = _degrade(text, age)
+        chains = list(chains) + ["时效: 数据可能过期(降级为核验)"]
     return {"text": season.clean_text(text), "chain": chains, "detail": detail}

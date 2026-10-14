@@ -196,6 +196,7 @@
 
   /* ---------------- 预报表格 ---------------- */
   const tb = document.querySelector("#fcTable tbody");
+  const _fct = document.getElementById("fcTitle"); if (_fct) _fct.textContent = `未来 ${fc.length} 天预报与行动建议`;
   tb.innerHTML = fc.map(d => `<tr class="fc-row">
     <td data-label="日期">${d.date}<div class="tag">${"日一二三四五六"[new Date(d.date).getDay()]}</div></td>
     <td data-label="风险"><span class="badge b${d.risk_level}">${d.risk_level}</span></td>

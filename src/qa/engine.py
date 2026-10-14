@@ -130,6 +130,8 @@ STRONG = [
     ("降级", "ops"), ("断网", "ops"), ("提前期", "ops"), ("运行批次", "ops"), ("血缘", "ops"), ("更新时间", "ops"),
     ("误差", "ops"), ("准不准", "model"), ("可信", "data_source"), ("可靠", "data_source"), ("靠谱", "data_source"),
     ("造假", "data_source"), ("数据", "data_source"),
+    ("告警", "ops"), ("通知", "ops"), ("送达", "ops"), ("投递", "ops"), ("最近两次", "ops"), ("两次", "ops"),
+    ("样本", "ops"), ("验证历史", "ops"), ("差异", "ops"), ("漂移", "ops"), ("信谁", "ops"), ("上游", "ops"),
     ("传感器", "data_source"), ("台站", "data_source"), ("实时站", "data_source"), ("现场站", "data_source"),
     ("受灾", "data_source"), ("产量", "data_source"), ("盲测", "data_source"), ("误报", "model"), ("漏报", "model"),
     ("哪块地", "plot"), ("地块", "plot"),
@@ -435,6 +437,9 @@ def _extract_state(q, history, r, base=None):
     st["intent"] = r.get("intent")
     try:
         from . import nlg
+        flds = _parse_fields(q)
+        if flds:
+            st["fields"] = flds
         ad = nlg._parse_abs_date(q)
         if ad is None and r.get("text"):
             m = re.search(r"(20\d{2}-\d{2}-\d{2})", r["text"])
@@ -474,18 +479,27 @@ def answer(question, context=None, history=None, state=None):
             st.update(r["state"])
         from . import nlg
         ctx = nlg.classify_ctx(_load_data(), q)
+        fields = _parse_fields(question) or (st.get("fields") if isinstance(st, dict) else None)
+        if fields:
+            st["fields"] = fields
+        q2 = q
+        try:
+            if st.get("active_date") and nlg._parse_abs_date(q) is None:
+                q2 = q + " " + str(st["active_date"])
+        except Exception:  # noqa: BLE001
+            pass
         if st.get("format") == "json":
-            obj = nlg.structured_answer(ctx, q, _parse_fields(question))
+            obj = nlg.structured_answer(ctx, q2, fields)
             if obj is not None:
                 r["text"] = json.dumps(obj, ensure_ascii=False)
                 r["format"] = "json"
         elif st.get("format") == "table":
-            obj = nlg.structured_answer(ctx, q)
+            obj = nlg.structured_answer(ctx, q2, None)
             if isinstance(obj, dict):
                 rows = obj.get("days") or ([obj] if obj.get("date") else [])
             else:
                 rows = []
-            tbl = nlg.markdown_table(rows)
+            tbl = nlg.markdown_table(rows, fields)
             if tbl:
                 r["text"] = tbl
                 r["format"] = "table"
@@ -606,6 +620,7 @@ def _answer_impl(question, context=None, history=None, state=None):
             state["active_date"] = target_q
         except Exception:  # noqa: BLE001
             pass
+    # （相对日期强制按日回答放在 strong/kw 计算之后）
     if carry and (is_follow or pronoun):
         qt = qt + " " + carry
     qt_s = _strip_negations(qt)
@@ -614,6 +629,9 @@ def _answer_impl(question, context=None, history=None, state=None):
     strongs = _strong_all(stripped) or _strong_all(qt_s)
     strong = strongs[0] if strongs else None
     kw = _keyword_intent(qt_s)
+    # 纯相对日期追问（如"大后天呢"）无强/关词时，强制按日回答
+    if _off_q is not None and not strong and not kw:
+        intent, conf = "risk_today", 0.9
 
     # 通用复合拆解：主题强意图 + 复合线索（风险/来源/模型/动作/具体灾害）
     comp = [x for x in dict.fromkeys(
@@ -629,6 +647,21 @@ def _answer_impl(question, context=None, history=None, state=None):
     except Exception:  # noqa: BLE001
         _field_query = False
     tasks = _ordered_tasks(stripped)
+    # 取消/改口（最后指令优先）：REMOVE 被取消任务，ADD 新任务
+    try:
+        removed = []
+        for m in re.finditer(r"(?:取消|不要|不查|去掉|不再|算了)\s*(?:的)?\s*(霜冻|倒春寒|高温|干旱|灌溉|浇水|排水|降雨|雨水|防冻|保险|风险|开采|排班|采摘)", stripped):
+            kw = m.group(1)
+            for k, it in _COMPOUND_CUES:
+                if k == kw and it not in removed:
+                    removed.append(it)
+            if kw == "防冻" and "frost" not in removed:
+                removed.append("frost")
+        if removed:
+            tasks = [t for t in tasks if t[1] not in removed]
+            state["tasks"] = [x for x in (state.get("tasks") or []) if x not in removed]
+    except Exception:  # noqa: BLE001
+        pass
     if not is_follow and not _field_query and (len(tasks) >= 3 or (len(tasks) >= 2 and has_sep)):
         try:
             from . import nlg as _nlg
@@ -685,7 +718,8 @@ def _answer_impl(question, context=None, history=None, state=None):
     return {"engine": "teawindow-own", "mode": "rules", "intent": intent, "confidence": round(conf, 2),
             "backend": intent_backend(), "retrieval": retrieval_backend(),
             "slots": sl, "detail": bool(res.get("detail")), "follow_up": bool(is_follow),
-            "text": res["text"], "chain": res["chain"]}
+            "text": res["text"], "chain": res["chain"],
+            "state": {k: v for k, v in (("active_date", state.get("active_date")), ("tasks", state.get("tasks"))) if v is not None}}
 
 
 if __name__ == "__main__":

@@ -55,8 +55,10 @@ def main():
     def ready():
         j = json.loads(_get(base + "/api/ready")[1])
         sha_ok = (not a.expect_sha) or str(j.get("build", "")).startswith(a.expect_sha[:12])
-        good = bool(j.get("ready")) and not j.get("missing_critical") and sha_ok
-        return good, f"ready={j.get('ready')} build={j.get('build')} missing={j.get('missing_critical')} age={j.get('age_minutes')}"
+        good = bool(j.get("service_ready", j.get("ready"))) and not j.get("missing_critical") and sha_ok
+        return good, (f"service_ready={j.get('service_ready')} decision_ready={j.get('decision_ready')} "
+                      f"build={j.get('build')} missing={j.get('missing_critical')} age={j.get('age_minutes')} "
+                      f"warnings={j.get('warnings')}")
     chk("ready", ready)
 
     def routes():

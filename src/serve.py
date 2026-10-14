@@ -291,10 +291,12 @@ def _refresh(do_fetch=True):
         pipeline.run(do_fetch=do_fetch, do_ndvi=do_fetch, do_figs=False, do_reports=False)
         _advice_cache.clear()
         _save_snapshot(fetched_at=season.now().strftime("%Y-%m-%d %H:%M:%S"), note="scheduled/manual refresh")
-        store.set_refresh_state("ok", round(_time.time() - t0, 1))
+        store.set_refresh_state("ok", round(_time.time() - t0, 1),
+                                next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
         return {"status": "ok"}
     except Exception as e:  # noqa: BLE001
-        store.set_refresh_state("error", round(_time.time() - t0, 1), str(e))
+        store.set_refresh_state("error", round(_time.time() - t0, 1), str(e),
+                                next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
         raise
     finally:
         _refresh_lock.release()
@@ -1014,8 +1016,10 @@ def ready():
     lin = _lineage_ok()
     rs = store.get_refresh_state()
     refresh_ok = rs.get("status") not in ("unknown", "error")
-    # 部署就绪：路由完整 + 数据可用 + 血缘齐备 + 刷新状态已知（新鲜度单独用 data_fresh/warnings 表达）
-    ok = has_data and not missing and lin and refresh_ok
+    cmp = _compare_upstream()
+    compare_ok = ("error" not in cmp) and (cmp.get("changed") is not True)
+    service_ready = bool(has_data and not missing)
+    decision_ready = bool(service_ready and (fr.get("stale") is not True) and lin and refresh_ok and compare_ok)
     warnings = []
     if not has_data:
         warnings.append("no_data")
@@ -1025,13 +1029,18 @@ def ready():
     if not lin:
         warnings.append("no_lineage")
     if not refresh_ok:
-        warnings.append("refresh_unknown")
-    return {"ready": ok, "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
+        warnings.append("refresh_" + str(rs.get("status")))
+    if "error" in cmp:
+        warnings.append("compare_failed")
+    elif cmp.get("changed"):
+        warnings.append("forecast_drift")
+    return {"ready": decision_ready, "service_ready": service_ready, "decision_ready": decision_ready,
+            "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
             "route_count": len(routes), "critical_total": len(CRITICAL_ROUTES),
             "missing_critical": missing, "data_ready": has_data,
             "age_minutes": fr.get("age_minutes"), "stale": fr.get("stale"),
             "data_fresh": fr.get("stale") is not True,
-            "lineage_ok": lin, "refresh_ok": refresh_ok, "refresh": rs,
+            "lineage_ok": lin, "refresh_ok": refresh_ok, "compare": cmp, "refresh": rs,
             "warnings": warnings,
             "server_time": season.now().isoformat(timespec="seconds")}
 

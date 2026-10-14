@@ -4,7 +4,7 @@ name: Daily refresh (external cron)
 # 由 GitHub Actions 每日定时调用线上 /api/refresh，并顺带保活。
 on:
   schedule:
-    - cron: "0 22 * * *"   # 22:00 UTC = 06:00 Asia/Shanghai
+    - cron: "20 */3 * * *"   # 每 3 小时（UTC），与内置刷新对齐
   workflow_dispatch:
 
 jobs:
