@@ -743,6 +743,20 @@ def test_yaobuyao_is_not_cancel():
     assert "frost" in r["intent"] and "insurance" in r["intent"]      # "要不要防冻" 不应被当作"取消防冻"
 
 
+def test_memory_first_and_nth_question():
+    import qa.engine as e
+    h = [{"role": "user", "content": "今天天气如何？"}, {"role": "assistant", "content": "x"},
+         {"role": "user", "content": "明天要不要防冻？"}, {"role": "assistant", "content": "y"}]
+    assert "今天天气如何" in e.answer("我刚刚第一句问了什么", None, h)["text"]
+    assert "明天要不要防冻" in e.answer("第2个问题问的是啥", None, h)["text"]
+
+
+def test_lineage_question_routes_to_ops():
+    import qa.engine as e
+    r = e.answer("当前数据版本的上游 URL、参数、完整 SHA-256 和版本号")
+    assert r["intent"] == "ops"      # 血缘深答应路由到 ops，而非通用来源模板
+
+
 def test_english_halflanguage_rejected():
     import qa.engine as e
     r = e.answer("Tomorrow forecast frost risk and temperature high?")

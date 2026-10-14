@@ -133,6 +133,8 @@ STRONG = [
     ("雨最大", "rain_max"), ("最大雨", "rain_max"), ("哪天雨", "rain_max"), ("降雨最大", "rain_max"),
     ("哪个风险", "compare"), ("哪个更高", "compare"), ("哪个高", "compare"), ("风险更高", "compare"),
     ("数据来源", "data_source"), ("从哪来", "data_source"), ("用什么模型", "model"), ("准确率", "model"),
+    ("数据版本", "ops"), ("版本号", "ops"), ("版本", "ops"), ("SHA", "ops"), ("sha", "ops"),
+    ("URL", "ops"), ("url", "ops"), ("参数", "ops"), ("血缘", "ops"), ("构建", "ops"),
     ("刷新", "ops"), ("多久更新", "ops"), ("多久刷新", "ops"), ("过期", "ops"), ("数据年龄", "ops"),
     ("降级", "ops"), ("断网", "ops"), ("提前期", "ops"), ("运行批次", "ops"), ("血缘", "ops"), ("更新时间", "ops"),
     ("误差", "ops"), ("准不准", "model"), ("可信", "data_source"), ("可靠", "data_source"), ("靠谱", "data_source"),
@@ -615,6 +617,22 @@ def _answer_impl(question, context=None, history=None, state=None):
         tail = "…" if len(prev_assistant) > 140 else ""
         return _reply("我上一条回答是：「" + prev_assistant[:140] + tail + "」。", intent="memory",
                       chain=["会话记忆: 上一轮回答"])
+    # 会话记忆泛化：最早/第一句、第 N 个问题
+    _users = [m.get("content", "") for m in (history or []) if m.get("role") == "user"]
+    if _users and any(k in question for k in ["第一句", "第一个问题", "头一句", "最初的问题",
+                                              "最开始问", "最早问", "最早的问题", "开头问"]):
+        return _reply(f"你最早问的是：「{_users[0]}」。", intent="memory", chain=["会话记忆: 最早问题"])
+    _mm = re.search(r"第\s*([一二三四五六七八九十\d]+)\s*(?:个)?(?:问题|句提问|问)", question)
+    if _users and _mm:
+        try:
+            from . import nlg as _nm
+            _t = _mm.group(1)
+            _idx = int(_t) if _t.isdigit() else _nm._cn2num(_t)
+        except Exception:  # noqa: BLE001
+            _idx = int(_mm.group(1)) if _mm.group(1).isdigit() else None
+        if _idx and 1 <= _idx <= len(_users):
+            return _reply(f"你第 {_idx} 个问题问的是：「{_users[_idx - 1]}」。", intent="memory",
+                          chain=[f"会话记忆: 第{_idx}问"])
     if any(k in question for k in ["刚刚我问", "我刚才问", "我问了什么", "上一个问题"]) and not prev:
         if ctx_summary:
             return _reply("会话摘要（较早轮次）：「" + ctx_summary[:160] + "」。最近一轮见下方记录。", intent="memory",
@@ -657,6 +675,12 @@ def _answer_impl(question, context=None, history=None, state=None):
         try:
             d0 = datetime.date.fromisoformat(str(active_date)[:10])
             active_date = (d0 + datetime.timedelta(days=mshift)).isoformat()
+            state["active_date"] = active_date
+        except Exception:  # noqa: BLE001
+            pass
+    elif mshift is not None:                 # 独立句"前一天/下一天"：以今天为基准
+        try:
+            active_date = (season.today() + datetime.timedelta(days=mshift)).isoformat()
             state["active_date"] = active_date
         except Exception:  # noqa: BLE001
             pass
