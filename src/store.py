@@ -78,6 +78,12 @@ class _PgConn:
     def commit(self):
         self._raw.commit()
 
+    def rollback(self):
+        try:
+            self._raw.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
     def close(self):
         self._raw.close()
 
@@ -101,6 +107,14 @@ def _ddl():
     ]
 
 
+def _safe_rollback():
+    try:
+        if _conn is not None:
+            _conn.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _db():
     global _conn
     if _conn is None:
@@ -120,13 +134,16 @@ def _db():
             try:
                 _conn.execute(stmt)
             except Exception:  # noqa: BLE001
-                pass
+                _safe_rollback()
         for col, typ in (("upstream_url", "TEXT"), ("params", "TEXT"), ("raw_sha256_full", "TEXT")):
             try:
                 _conn.execute(f"ALTER TABLE data_versions ADD COLUMN {col} {typ}")
             except Exception:  # noqa: BLE001
-                pass
-        _conn.commit()
+                _safe_rollback()   # 列已存在时 Postgres 会中断事务，必须回滚
+        try:
+            _conn.commit()
+        except Exception:  # noqa: BLE001
+            _safe_rollback()
     return _conn
 
 
