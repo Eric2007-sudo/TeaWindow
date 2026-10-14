@@ -11,8 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
-CRITICAL = ["/api/health", "/api/summary", "/api/days?scope=forecast", "/api/ask", "/api/realtime",
-            "/api/updates", "/api/data/versions", "/api/forecast/verify", "/api/ready", "/api/alerts"]
+CRITICAL = ["/api/health", "/api/summary", "/api/days?scope=forecast", "/api/ask?q=%E4%BB%8A%E5%A4%A9%E6%9C%89%E9%A3%8E%E9%99%A9%E5%90%97",
+            "/api/realtime", "/api/updates", "/api/data/versions", "/api/forecast/verify", "/api/ready", "/api/alerts"]
 
 
 def _get(url, timeout=30):
