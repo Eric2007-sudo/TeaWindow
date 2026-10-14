@@ -47,6 +47,7 @@ async def _lifespan(app):  # noqa: ARG001
         _refresh(True)
 
     def _boot_tasks():
+        _sync_data_from_db()   # 先把 DB 中更新的构建产物同步回本地（跨实例轮换）
         # 预加载模型（意图 ONNX + 检索索引），避免首个请求触发冷加载超时
         try:
             from qa import intent_onnx, retriever
@@ -312,6 +313,12 @@ def _refresh(do_fetch=True, light=True):
         _advice_cache.clear()
         _save_snapshot(fetched_at=season.now().strftime("%Y-%m-%d %H:%M:%S"),
                        note=("light refresh" if light else "full refresh"))
+        try:   # 把构建产物存入 DB，保证跨实例轮换不丢（免费层容器磁盘会重置）
+            with open(DATA_JSON, encoding="utf-8") as f:
+                blob = f.read()
+            store.set_data_json(json.loads(blob).get("meta", {}).get("updated") or season.now().strftime("%Y-%m-%d %H:%M:%S"), blob)
+        except Exception as e:  # noqa: BLE001
+            print("[serve] data.json 入库跳过:", e)
         store.set_refresh_state("ok", round(_time.time() - t0, 1),
                                 next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
         return {"status": "ok"}
@@ -323,6 +330,28 @@ def _refresh(do_fetch=True, light=True):
         sys.argv = _saved_argv
         os.environ.pop("TW_FETCH_FORECAST_ONLY", None)
         _refresh_lock.release()
+
+
+def _sync_data_from_db():
+    """启动时若 DB 中构建产物的时间更新，则同步回 web/data.json / data.js（跨实例轮换持久）。"""
+    try:
+        dj = store.get_data_json()
+        if not dj or not dj.get("blob"):
+            return
+        cur_ts = None
+        if os.path.exists(DATA_JSON):
+            try:
+                cur_ts = (_load().get("meta", {}) or {}).get("updated")
+            except Exception:  # noqa: BLE001
+                cur_ts = None
+        if not cur_ts or str(dj["ts"]) > str(cur_ts):
+            with open(DATA_JSON, "w", encoding="utf-8") as f:
+                f.write(dj["blob"])
+            with open(os.path.join(WEB, "data.js"), "w", encoding="utf-8") as f:
+                f.write("window.TW_DATA = " + dj["blob"] + ";\n")
+            print("[serve] 已从数据库同步 data.json:", dj["ts"])
+    except Exception as e:  # noqa: BLE001
+        print("[serve] data.json 同步跳过:", e)
 
 
 def _save_snapshot(fetched_at=None, note=""):

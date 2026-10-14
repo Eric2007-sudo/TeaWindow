@@ -104,6 +104,7 @@ def _ddl():
         "CREATE TABLE IF NOT EXISTS alerts_state(k TEXT PRIMARY KEY, ts TEXT, codes TEXT)",
         "CREATE TABLE IF NOT EXISTS nonces(nonce TEXT PRIMARY KEY, ts TEXT, device_id TEXT)",
         f"CREATE TABLE IF NOT EXISTS alert_deliveries(id {ai}, ts TEXT, new_codes TEXT, ok INTEGER, detail TEXT)",
+        "CREATE TABLE IF NOT EXISTS data_json(k TEXT PRIMARY KEY, ts TEXT, blob TEXT)",
     ]
 
 
@@ -481,6 +482,20 @@ def last_alert_delivery():
     if not row:
         return None
     return {"ts": row[0], "new_codes": row[1], "ok": bool(row[2]), "detail": row[3]}
+
+
+# ---------------- 构建产物（web/data.json）持久化 ----------------
+def set_data_json(ts, blob):
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO data_json(k,ts,blob) VALUES('main',?,?)", (ts, blob))
+        c.commit()
+
+
+def get_data_json():
+    with _LOCK:
+        row = _db().execute("SELECT ts,blob FROM data_json WHERE k='main'").fetchone()
+    return {"ts": row[0], "blob": row[1]} if row else None
 
 
 # ---------------- 盲测评估：预测快照 × 田间结果（事件级） ----------------
