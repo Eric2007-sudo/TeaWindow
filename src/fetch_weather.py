@@ -15,6 +15,11 @@ LAT = 30.2139
 LON = 120.0961
 TZ = "Asia/Shanghai"
 OM_KEY = os.environ.get("OPEN_METEO_API_KEY", "")
+# 合规 UA：MET Norway 等要求可识别应用并提供联系方式（可在 Render 用 HTTP_UA 覆盖）
+UA = os.environ.get(
+    "HTTP_UA",
+    "TeaWindow/1.0 (AI4Climate Meijiawu tea-garden; contact: 2302372846@qq.com)",
+)
 
 
 def _om(url, params):
@@ -71,7 +76,7 @@ def _get(url, params, retries=5, fast429=False):
     for i in range(retries):
         try:
             r = requests.get(url, params=params, timeout=60,
-                             headers={"User-Agent": "TeaWindow/1.0"})
+                             headers={"User-Agent": UA})
             if r.status_code == 429:
                 if fast429:
                     raise RuntimeError("429 Too Many Requests")
@@ -117,7 +122,7 @@ def fetch_forecast_metno(days=16):
     """备用源：MET Norway Locationforecast（hourly→daily 聚合，字段名对齐 Open-Meteo）。"""
     url = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
     r = requests.get(url, params={"lat": LAT, "lon": LON},
-                     headers={"User-Agent": "TeaWindow/1.0 (climate prototype; contact: teawindow)"}, timeout=60)
+                     headers={"User-Agent": UA}, timeout=60)
     r.raise_for_status()
     ts = r.json()["properties"]["timeseries"]
     byday = {}
