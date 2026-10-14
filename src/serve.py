@@ -57,8 +57,8 @@ async def _lifespan(app):  # noqa: ARG001
     # 若尚无数据版本，启动时落一个初始快照（数据血缘）
     try:
         if store.version_count() == 0 and os.path.exists(DATA_JSON):
-            _save_snapshot()
-            print("[serve] 初始数据版本已记录")
+            _save_snapshot(note="startup-existing（沿用已有加工数据，非新抓取）")
+            print("[serve] 初始数据版本已记录（沿用已有数据）")
     except Exception as e:  # noqa: BLE001
         print("[serve] 初始快照跳过:", e)
     yield
@@ -111,6 +111,8 @@ class AskResp(BaseModel):
     source: str | None = None
     base_text: str | None = None
     note: str | None = None
+    format: str | None = None
+    state: dict | None = None
 
 
 def _load():
@@ -128,6 +130,33 @@ def _cur_day(days):
         return m[0]
     past = [d for d in days if d["date"] <= today]
     return past[-1] if past else days[-1]
+
+
+STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "150"))
+
+
+def _freshness(d=None):
+    """数据新鲜度闸门：fetched_at / age_minutes / stale / 刷新状态 / 构建。"""
+    try:
+        d = d or _load()
+        meta = d.get("meta", {}) or {}
+        fetched = meta.get("fetched_at") or meta.get("updated")
+        try:
+            fdt = datetime.datetime.fromisoformat(str(fetched))
+            now = season.now()
+            if fdt.tzinfo is None:
+                now = now.replace(tzinfo=None)
+            age = (now - fdt).total_seconds() / 60.0
+        except Exception:  # noqa: BLE001
+            age = None
+    except Exception:  # noqa: BLE001
+        fetched, age = None, None
+    return {"fetched_at": fetched,
+            "age_minutes": None if age is None else round(age, 1),
+            "stale": bool(age is not None and age > STALE_MINUTES),
+            "stale_threshold_minutes": STALE_MINUTES,
+            "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
+            "refresh": store.get_refresh_state()}
 
 
 # ---- 简单限流 + 管理令牌（P0-2 / P1-2）----
@@ -176,10 +205,16 @@ async def _guard_and_headers(request, call_next):
         _METRICS["latency_max_ms"] = max(_METRICS["latency_max_ms"], dt)
         p = request.url.path
         _METRICS["by_path"][p] = _METRICS["by_path"].get(p, 0) + 1
+        if p.startswith("/api/"):
+            _METRICS["lat"].append(dt)
+            if len(_METRICS["lat"]) > 500:
+                del _METRICS["lat"][:250]
         if resp.status_code >= 500:
             _METRICS["errors"] += 1
     except Exception:  # noqa: BLE001
         pass
+    if request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
@@ -193,18 +228,23 @@ async def _guard_and_headers(request, call_next):
 def _refresh(do_fetch=True):
     if not _refresh_lock.acquire(blocking=False):
         return {"status": "busy"}
+    t0 = _time.time()
     try:
         import pipeline
         pipeline.run(do_fetch=do_fetch, do_ndvi=do_fetch, do_figs=False, do_reports=False)
         _advice_cache.clear()
-        _save_snapshot()
+        _save_snapshot(fetched_at=season.now().strftime("%Y-%m-%d %H:%M:%S"), note="scheduled/manual refresh")
+        store.set_refresh_state("ok", round(_time.time() - t0, 1))
         return {"status": "ok"}
+    except Exception as e:  # noqa: BLE001
+        store.set_refresh_state("error", round(_time.time() - t0, 1), str(e))
+        raise
     finally:
         _refresh_lock.release()
 
 
-def _save_snapshot():
-    """把当前预报按"版本"入库（含参数/构建/hash），用于数据血缘与长期核对。"""
+def _save_snapshot(fetched_at=None, note=""):
+    """把当前预报按"版本"入库（含参数/构建/hash/真实抓取时间），用于数据血缘与新鲜度。"""
     try:
         import hashlib
         d = _load()
@@ -213,13 +253,14 @@ def _save_snapshot():
                  "risk_R": x.get("risk_R"), "risk_level": x.get("risk_level")}
                 for x in d["days"] if x["source"] == "forecast"]
         raw = json.dumps(days, ensure_ascii=False, sort_keys=True)
-        meta = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
+        meta = {"ts": season.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "source": "Open-Meteo (ERA5 + forecast)", "model": "teawindow-pipeline",
                 "gen_time": d.get("meta", {}).get("updated"),
-                "fetched_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "fetched_at": fetched_at or (d.get("meta", {}) or {}).get("fetched_at") or d.get("meta", {}).get("updated"),
                 "lat": d.get("meta", {}).get("lat"), "lon": d.get("meta", {}).get("lon"),
                 "raw_sha256": hashlib.sha256(raw.encode()).hexdigest()[:16],
-                "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12]}
+                "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12],
+                "note": note}
         store.save_snapshot(meta, days)
     except Exception as e:  # noqa: BLE001
         print("[serve] snapshot skip:", e)
@@ -233,9 +274,13 @@ def health():
         retr = retriever.backend()
     except Exception:  # noqa: BLE001
         retr = None
+    fr = _freshness() if os.path.exists(DATA_JSON) else {}
     return {"status": "ok", "data_ready": os.path.exists(DATA_JSON),
             "has_llm_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
-            "retrieval": retr}
+            "retrieval": retr,
+            "fetched_at": fr.get("fetched_at"), "age_minutes": fr.get("age_minutes"),
+            "stale": fr.get("stale"), "build": fr.get("build"),
+            "refresh": fr.get("refresh")}
 
 
 @app.get("/api/overview")
@@ -256,6 +301,9 @@ def summary():
     pick_window = d.get("pick_window", []) if season_name == "spring" else []
     return {
         "updated": d["meta"]["updated"],
+        "fetched_at": (d.get("meta", {}) or {}).get("fetched_at", d["meta"].get("updated")),
+        "age_minutes": _freshness(d)["age_minutes"],
+        "stale": _freshness(d)["stale"],
         "season": season_name,
         "data_age_days": (season.today() - datetime.date.fromisoformat(str(cur["date"])[:10])).days if cur else None,
         "current": {"date": cur["date"], "risk_level": cur["risk_level"],
@@ -348,6 +396,7 @@ class AskReq(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     engine: str = "own"   # own=自研引擎(默认)；llm=DeepSeek 可选增强
     history: list[HistoryMessage] = Field(default_factory=list, max_length=20)
+    state: dict | None = None   # 结构化会话槽位（active_date/format/negated…）
 
     @field_validator("question", mode="before")
     @classmethod
@@ -375,13 +424,13 @@ class OutcomeReq(BaseModel):
 
 
 # 运行指标（进程内，用于监控/告警）
-_METRICS = {"total": 0, "errors": 0, "by_path": {}, "latency_ms_sum": 0.0, "latency_max_ms": 0.0}
+_METRICS = {"total": 0, "errors": 0, "by_path": {}, "latency_ms_sum": 0.0, "latency_max_ms": 0.0, "lat": []}
 
 
-def _ask(q, engine, history=None):
+def _ask(q, engine, history=None, state=None):
     from qa import engine as qa_engine
     try:
-        fut = _ASK_EXEC.submit(qa_engine.answer, q, _context(), history or [])
+        fut = _ASK_EXEC.submit(qa_engine.answer, q, _context(), history or [], state or {})
         base = fut.result(timeout=float(os.environ.get("ASK_TIMEOUT", "20")))
     except _cf.TimeoutError:
         base = {"engine": "teawindow-own", "mode": "rules", "intent": "timeout", "confidence": 0.0,
@@ -418,7 +467,7 @@ def ask(request: Request, req: AskReq):
         _rate_limit("llm:" + ip, limit=int(os.environ.get("LLM_RPM", "8")))
     _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
     hist = [{"role": m.role, "content": m.content[:500]} for m in req.history[-8:]]
-    return _ask(req.question.strip(), req.engine, hist)
+    return _ask(req.question.strip(), req.engine, hist, req.state)
 
 
 @app.get("/api/ask", response_model=AskResp)
@@ -562,12 +611,39 @@ def sensor_batch(request: Request, req: SensorBatch):
 
 @app.get("/api/realtime")
 def realtime():
-    """公开只读：各站最新观测（仅数值，无备注/隐私），供仪表盘实时刷新。"""
+    """公开只读：各站最新观测 + 新鲜度（observed_at/received_at/age_seconds/status）。"""
     latest = store.sensor_latest()
     keep = ("ts", "temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
-    pub = {sid: {k: r.get(k) for k in keep if r.get(k) is not None} for sid, r in latest.items()}
-    return {"updated": datetime.datetime.now().isoformat(timespec="seconds"),
-            "n": store.sensor_count(), "stations": pub}
+    stations = {}
+    latest_obs = None
+    for sid, r in latest.items():
+        age = None
+        try:
+            rec = datetime.datetime.fromisoformat(str(r.get("received")))
+            age = (datetime.datetime.now() - rec).total_seconds()
+        except Exception:  # noqa: BLE001
+            age = None
+        if age is None:
+            status = "unknown"
+        elif age > 86400:
+            status = "offline"
+        elif age > 3600:
+            status = "stale"
+        else:
+            status = "ok"
+        pub = {k: r.get(k) for k in keep if r.get(k) is not None}
+        pub.update({"observed_at": r.get("ts"), "received_at": r.get("received"),
+                    "age_seconds": None if age is None else int(age), "status": status})
+        stations[sid] = pub
+        if latest_obs is None or str(r.get("ts")) > str(latest_obs):
+            latest_obs = r.get("ts")
+    n = store.sensor_count()
+    return {"server_time": season.now().isoformat(timespec="seconds"),
+            "updated": season.now().isoformat(timespec="seconds"),
+            "n": n, "count": n, "latest_observation_at": latest_obs,
+            "status": "ok" if stations else "no_sensors",
+            "message": None if stations else "尚未接入现场传感器（0 个站点上报）",
+            "stations": stations}
 
 
 @app.get("/api/sensor/latest")
@@ -592,13 +668,15 @@ def refresh(request: Request, background: BackgroundTasks, fetch: bool = True):
     return {"status": "scheduled", "fetch": fetch}
 
 
-# ---- 定时任务：每日 06:00 刷新（若有 apscheduler）----
+# ---- 定时任务：每日 06:00 + 每 3 小时刷新（若有 apscheduler）----
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     _sched = BackgroundScheduler(timezone="Asia/Shanghai")
     _sched.add_job(lambda: _refresh(True), "cron", hour=6, minute=0, id="daily_refresh")
+    _sched.add_job(lambda: _refresh(True), "cron", hour="0,3,9,12,15,18,21", minute=20, id="refresh_3h",
+                   replace_existing=True)
     _sched.start()
-    print("[serve] 已启用每日 06:00 定时刷新")
+    print("[serve] 已启用定时刷新（每日 06:00 + 每 3 小时）")
 except Exception as e:  # noqa: BLE001
     print("[serve] 未启用定时任务:", e)
 
@@ -692,33 +770,49 @@ def outcomes(request: Request, limit: int = 100):
 
 @app.get("/api/pilot/evaluate")
 def pilot_evaluate(request: Request):
-    """前瞻性盲测评估：需"冻结预测快照"与"田间结果"配对后计算 precision/recall/漏报/误报/提前量。"""
+    """前瞻性盲测评估：快照 × 田间结果按日期配对，输出事件级混淆矩阵/提前量（可复算）。"""
     _require_admin(request)
-    n_v, n_o = store.version_count(), store.outcome_count()
-    ready = n_v > 0 and n_o > 0
-    return {"status": "ready" if ready else "pending", "versions": n_v, "outcomes": n_o,
-            "note": "接口与存储已就绪；接入田间结果后自动按事件级计算指标（当前按需返回 pending）。"}
+    return store.pilot_evaluate()
 
 
 # ---- 运行指标 / 告警 / 实时更新 ----
 @app.get("/api/metrics")
 def metrics(request: Request):
     _require_admin(request)
+    lat = sorted(_METRICS["lat"])
+    def pct(q):
+        if not lat:
+            return None
+        i = min(len(lat) - 1, int(round(q * (len(lat) - 1))))
+        return round(lat[i], 1)
     avg = (_METRICS["latency_ms_sum"] / _METRICS["total"]) if _METRICS["total"] else 0
+    fr = _freshness() if os.path.exists(DATA_JSON) else {}
     return {"requests": _METRICS["total"], "errors_5xx": _METRICS["errors"],
             "latency_avg_ms": round(avg, 1), "latency_max_ms": round(_METRICS["latency_max_ms"], 1),
-            "by_path": _METRICS["by_path"], "llm_usage": _llm_usage, "llm_daily_budget": LLM_DAILY_BUDGET,
+            "latency_p50_ms": pct(0.50), "latency_p95_ms": pct(0.95), "latency_p99_ms": pct(0.99),
+            "by_path": _METRICS["by_path"],
+            "data_age_minutes": fr.get("age_minutes"), "data_stale": fr.get("stale"),
+            "refresh": fr.get("refresh"), "build": fr.get("build"),
+            "llm_usage": _llm_usage, "llm_daily_budget": LLM_DAILY_BUDGET,
             "sensor_count": store.sensor_count(), "device_active": store.device_count(),
             "versions": store.version_count(), "outcomes": store.outcome_count()}
 
 
 @app.get("/api/updates")
 def updates(since: str = ""):
-    """轻量实时：服务器时间 + 各来源计数 + 各站最新，用于前端增量刷新。"""
+    """轻量实时：服务器时间 + 各来源计数；`since` 为 ISO 时间则只返回其后新增观测（真增量）。"""
     latest = store.sensor_latest()
     keep = ("ts", "temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
+    sin = (since or "").strip()
+    if sin:
+        items = [r for r in store.sensor_items("", 500) if str(r.get("received", "")) > sin]
+        stations = {}
+        for r in items:
+            stations[r.get("station_id")] = {k: r.get(k) for k in keep if r.get(k) is not None}
+        return {"server_time": season.now().isoformat(timespec="seconds"), "since": sin,
+                "incremental": True, "new_sensor": len(items), "stations": stations}
     pub = {sid: {k: r.get(k) for k in keep if r.get(k) is not None} for sid, r in latest.items()}
-    return {"server_time": datetime.datetime.now().isoformat(timespec="seconds"),
+    return {"server_time": season.now().isoformat(timespec="seconds"),
             "sensor_count": store.sensor_count(), "outcome_count": store.outcome_count(),
             "version_count": store.version_count(), "stations": pub,
             "latest_version": (store.list_versions(1) or [None])[0]}

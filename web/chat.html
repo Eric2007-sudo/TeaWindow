@@ -33,12 +33,22 @@
   #clear{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;height:34px;padding:0 12px;cursor:pointer;font-size:12px}
   .opt{padding:2px 18px 12px;color:var(--muted);font-size:12px}
   .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  @media (max-width:380px){
+    header{padding:10px 12px}
+    h1{font-size:15px}
+    .hide-narrow{display:none}
+    .sub{display:none}
+    #clear{font-size:0;padding:0 10px}
+    #clear::after{content:"\1F9F9";font-size:16px}
+    .chips{padding:0 12px 6px}
+    #bar{padding:8px 12px 4px}
+  }
 </style>
 </head>
 <body>
 <header>
   <div>
-    <h1>梅坞采候 <span>TeaWindow</span> · 智能问答</h1>
+    <h1>梅坞采候 <span>TeaWindow</span><span class="hide-narrow"> · 智能问答</span></h1>
     <div class="sub">由 <b>TeaWindow 自研引擎</b>驱动（意图识别 → 调用本项目数据与模型 → 接地生成）；可选 DeepSeek 增强</div>
   </div>
   <button id="clear" type="button">清空对话</button>

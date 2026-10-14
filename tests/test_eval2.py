@@ -479,7 +479,8 @@ def test_outcome_and_pilot(monkeypatch):
     assert r.status_code == 200
     assert c.get("/api/outcomes", headers={"X-Admin-Token": "adm"}).status_code == 200
     pj = c.get("/api/pilot/evaluate", headers={"X-Admin-Token": "adm"}).json()
-    assert pj["status"] in ("pending", "ready") and pj["outcomes"] >= 1
+    assert pj["status"] in ("pending", "ready")
+    assert pj.get("outcomes", 0) >= 1
 
 
 def test_metrics_and_updates_and_phenology(monkeypatch):
@@ -490,3 +491,67 @@ def test_metrics_and_updates_and_phenology(monkeypatch):
     u = c.get("/api/updates")
     assert u.status_code == 200 and "server_time" in u.json()
     assert c.get("/api/phenology/validation").status_code == 200
+
+
+# ---------------- 第五轮：新鲜度 / 实时语义 / 季节数据层 / 适应 ----------------
+def test_freshness_and_cache_headers():
+    c = _client()
+    h = c.get("/api/health")
+    assert "age_minutes" in h.json() and "stale" in h.json()
+    assert h.headers.get("cache-control") == "no-store"
+    s = c.get("/api/summary").json()
+    assert "fetched_at" in s and "age_minutes" in s and "stale" in s
+
+
+def test_realtime_semantics_when_empty():
+    c = _client()
+    j = c.get("/api/realtime").json()
+    assert "server_time" in j and "status" in j
+    if j["n"] == 0:
+        assert j["status"] == "no_sensors" and j["message"]
+
+
+def test_forecast_advice_no_pick_in_offseason():
+    import json
+    import datetime
+    d = json.load(open("web/data.json", encoding="utf-8"))
+    assert d["meta"]["season"] == "off"
+    for x in d["days"]:
+        if x["source"] == "forecast":
+            assert "标准采" not in (x.get("advice") or "")
+
+
+def test_chinese_numeral_date():
+    import datetime
+    import qa.engine as e
+    target = datetime.date.today() + datetime.timedelta(days=6)
+    cn = {10: "十", 20: "二十", 21: "二十一", 22: "二十二", 23: "二十三", 24: "二十四", 25: "二十五", 26: "二十六"}
+    mm = cn.get(target.month, str(target.month)); dd = cn.get(target.day, str(target.day))
+    r = e.answer(f"{mm}月{dd}号会不会下雨")
+    assert target.isoformat() in r["text"]
+
+
+def test_json_format_output():
+    import json
+    import qa.engine as e
+    import datetime
+    d = (datetime.date.today() + datetime.timedelta(days=5)).isoformat()
+    r = e.answer(f"{d} 用 JSON 返回温度、降雨和风险", state={"format": "json"})
+    obj = json.loads(r["text"])
+    assert obj.get("date") == d
+    assert "tmin" in obj and "tmax" in obj and "precip" in obj
+
+
+def test_state_prev_day_carry():
+    import qa.engine as e
+    r = e.answer("前一天呢", state={"active_date": "2026-10-20"})
+    assert "2026-10-19" in r["text"]
+
+
+def test_metrics_percentiles(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    c.get("/api/health"); c.get("/api/summary")
+    m = c.get("/api/metrics", headers={"X-Admin-Token": "adm"}).json()
+    assert "latency_p95_ms" in m and "data_age_minutes" in m

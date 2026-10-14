@@ -45,6 +45,10 @@ def _db():
         _conn.execute("""CREATE TABLE IF NOT EXISTS outcomes(
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, date TEXT, plot TEXT, kind TEXT,
             area_mu REAL, damage_level TEXT, yield_kg REAL, quality TEXT, note TEXT)""")
+        # 刷新任务状态（外部定时/队列可写）
+        _conn.execute("""CREATE TABLE IF NOT EXISTS refresh_state(
+            k TEXT PRIMARY KEY, ts TEXT, status TEXT, duration_s REAL, error TEXT,
+            last_success TEXT, next_planned TEXT)""")
         _conn.commit()
     return _conn
 
@@ -244,6 +248,98 @@ def list_outcomes(limit=100):
 def outcome_count():
     with _LOCK:
         return _db().execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+
+
+# ---------------- 刷新任务状态（供新鲜度闸门/监控） ----------------
+def set_refresh_state(status, duration_s=None, error="", next_planned=""):
+    with _LOCK:
+        c = _db()
+        row = c.execute("SELECT last_success FROM refresh_state WHERE k='main'").fetchone()
+        last_success = row[0] if row else None
+        if status == "ok":
+            last_success = datetime_now()
+        c.execute("""INSERT OR REPLACE INTO refresh_state(k,ts,status,duration_s,error,last_success,next_planned)
+                     VALUES('main',?,?,?,?,?,?)""",
+                  (datetime_now(), status, duration_s, (error or "")[:300], last_success, next_planned))
+        c.commit()
+    return {"status": status, "last_success": last_success}
+
+
+def get_refresh_state():
+    with _LOCK:
+        row = _db().execute("SELECT ts,status,duration_s,error,last_success,next_planned FROM refresh_state WHERE k='main'").fetchone()
+    if not row:
+        return {"status": "unknown", "last_success": None}
+    return dict(zip(("ts", "status", "duration_s", "error", "last_success", "next_planned"), row))
+
+
+# ---------------- 盲测评估：预测快照 × 田间结果（事件级） ----------------
+def pilot_evaluate(hazard_kinds=None, risk_threshold=0.5):
+    """把"冻结预测快照"与"田间结果"按日期配对，输出事件级混淆矩阵与提前量（可复算）。"""
+    hazard_kinds = hazard_kinds or {"霜冻受灾", "高温灼伤", "连阴雨"}
+    outcomes = list_outcomes(1000)
+    if not outcomes:
+        return {"status": "pending", "reason": "no_outcomes", "outcomes": 0, "versions": version_count()}
+    event_dates = {o["date"]: o for o in outcomes if o.get("kind") in hazard_kinds and o.get("date")}
+    if not event_dates:
+        return {"status": "pending", "reason": "no_hazard_outcomes", "outcomes": len(outcomes), "versions": version_count()}
+    vers = list_versions(200)
+    if not vers:
+        return {"status": "pending", "reason": "no_snapshots", "outcomes": len(outcomes), "versions": 0}
+    # 以最早覆盖事件日的快照为"预测"（冻结口径）
+    today_iso = datetime_now()[:10]
+    tp = fp = fn = tn = 0
+    leads = []
+    samples = []
+    # 预测为正的日期集合（取每个快照的 forecast_days）
+    pred_pos = {}
+    issued = {}
+    for v in vers:
+        for d in version_days(v["id"]):
+            r = d.get("risk_R")
+            if r is None:
+                continue
+            pos = (r >= risk_threshold)
+            # 保留最早一次覆盖该日、且在该日之前发布的预测
+            if d["date"] not in pred_pos or (v.get("ts") or "") < issued.get(d["date"], "9"):
+                pred_pos[d["date"]] = pos
+                issued[d["date"]] = v.get("ts") or ""
+    all_dates = set(pred_pos) | set(event_dates)
+    for day in sorted(all_dates):
+        if day > today_iso:
+            continue  # 只看已发生（有结果可判定）的日期
+        pred = bool(pred_pos.get(day, False))
+        actual = day in event_dates
+        if pred and actual:
+            tp += 1
+            try:
+                import datetime as _dt
+                lead = (_dt.date.fromisoformat(day) - _dt.date.fromisoformat(str(issued.get(day))[:10])).days
+                if lead >= 0:
+                    leads.append(lead)
+            except Exception:  # noqa: BLE001
+                pass
+        elif pred and not actual:
+            fp += 1
+        elif (not pred) and actual:
+            fn += 1
+        else:
+            tn += 1
+        if day in event_dates:
+            samples.append({"date": day, "predicted": pred, "actual": True, "kind": event_dates[day].get("kind")})
+    prec = tp / (tp + fp) if (tp + fp) else None
+    rec = tp / (tp + fn) if (tp + fn) else None
+    far = fp / (tp + fp) if (tp + fp) else None
+    csi = tp / (tp + fp + fn) if (tp + fp + fn) else None
+    import statistics as _st
+    return {"status": "ready", "matrix": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
+            "precision": None if prec is None else round(prec, 3),
+            "recall": None if rec is None else round(rec, 3),
+            "false_alarm_rate": None if far is None else round(far, 3),
+            "csi": None if csi is None else round(csi, 3),
+            "lead_days_mean": round(_st.mean(leads), 1) if leads else None,
+            "n_events": len(event_dates), "n_snapshots": len(vers),
+            "samples": samples[:50]}
 
 
 def datetime_now():

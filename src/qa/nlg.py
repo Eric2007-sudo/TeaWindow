@@ -34,8 +34,28 @@ def current_day(days):
     return past[-1] if past else days[-1]
 
 
+def _cn2num(s):
+    d = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+    if not s:
+        return 0
+    if s.isdigit():
+        return int(s)
+    if "十" in s:
+        if s == "十":
+            return 10
+        a, b = s.split("十", 1)
+        return d.get(a, 1) * 10 + (d.get(b, 0) if b else 0)
+    return d.get(s[0], 0)
+
+
 def _parse_abs_date(q):
-    """解析绝对日期：2026年10月20日 / 10月20日 / 2026-10-20 / 10-20（补当前年）。"""
+    """解析绝对日期：2026年10月20日 / 十月二十号 / 2026-10-20 / 10-20（补当前年）。"""
+    m = re.search(r"([一二三四五六七八九十]{1,3})\s*月\s*([一二三四五六七八九十]{1,3})\s*[日号]", q)
+    if m:
+        try:
+            return datetime.date(season.today().year, _cn2num(m.group(1)), _cn2num(m.group(2)))
+        except ValueError:
+            return None
     for pat in (r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?",
                 r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})"):
         m = re.search(pat, q)
@@ -495,7 +515,7 @@ def day_advice(d, season_off=False):
         acts.append(f"连旱{d.get('dry_run',0)}天但亏缺未达阈值，建议先测根层墒情再决定是否补水")
     if wet:
         acts.append(f"连雨{d.get('wet_run',0)}天/降水{precip}mm，清沟排水、鲜叶及时摊青")
-    if suit >= 40 and not (d.get("frost") or heat or dry or wet):
+    if suit >= 40 and not season_off and not (d.get("frost") or heat or dry or wet):
         acts.append("按一芽一叶标准采，鲜叶及时摊放")
     if not acts:
         acts.append("按常规管护，关注最新预报")
@@ -625,6 +645,22 @@ def day_detail(ctx, q, detail):
     if season.is_off():
         text += " " + season.care_hint()
     return text, ["数据: Open-Meteo 逐日+集合（同一目标日口径）", "模型: 复合风险"]
+
+
+def structured_answer(ctx, q):
+    """结构化输出（供 JSON 格式请求）：目标日/时段的字段对象，数值与基础 API 一致。"""
+    d, off = _focus_day(ctx, q)
+    if d is not None:
+        return {"site": "梅家坞", "season": season.policy()["season"], "date": d["date"],
+                "tmin": d.get("tmin"), "tmax": d.get("tmax"), "precip": d.get("precip"),
+                "p_frost": d.get("p_frost"), "p_heat": d.get("p_heat"),
+                "risk_level": d.get("risk_level"), "risk_R": d.get("risk_R"),
+                "suitability": int(d.get("suitability") or 0)}
+    fc = ctx["fc"][:ctx["H"]]
+    return {"site": "梅家坞", "season": season.policy()["season"],
+            "days": [{"date": x["date"], "tmin": x.get("tmin"), "tmax": x.get("tmax"),
+                      "precip": x.get("precip"), "risk_level": x.get("risk_level"),
+                      "risk_R": x.get("risk_R"), "suitability": int(x.get("suitability") or 0)} for x in fc]}
 
 
 HANDLERS = {

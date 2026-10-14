@@ -142,7 +142,8 @@ def main():
     data = {
         "meta": {
             "site": "梅家坞（西湖龙井核心产区）", "lat": 30.2139, "lon": 120.0961,
-            "updated": str(pd.Timestamp.now())[:19],
+            "updated": _season.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "fetched_at": _season.now().strftime("%Y-%m-%d %H:%M:%S"),
             "season": _season.policy()["season"],
             "sources": [
                 "Open-Meteo ERA5 历史 + 预报（气象）",

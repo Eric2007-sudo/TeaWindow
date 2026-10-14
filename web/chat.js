@@ -6,6 +6,7 @@
   const input = $("#q");
   const sendBtn = $("#send");
   const messages = [];           // 多轮上下文（刷新即清零）
+  let state = {};                // 结构化会话槽位（实体/格式/否定）
   let busy = false;
 
   function nowHM() {
@@ -85,7 +86,7 @@
       const r = await fetch("api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, engine: engine, history: history }),
+        body: JSON.stringify({ question: q, engine: engine, history: history, state: state }),
         signal: ctrl.signal,
       });
       clearTimeout(timer);
@@ -102,6 +103,7 @@
         return;
       }
       const d = await r.json();
+      if (d.state) state = d.state;
       const isLLM = d.engine === "teawindow-own+llm" || d.source === "deepseek-rephrase";
       const label = isLLM ? "引擎：自研 + DeepSeek 润色" : "引擎：TeaWindow 自研";
       const be = d.backend ? "　后端：" + d.backend : "";
@@ -126,7 +128,7 @@
     // 中文输入法组合期间不提交
     if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
   });
-  $("#clear").onclick = () => { log.innerHTML = ""; messages.length = 0; input.focus(); };
+  $("#clear").onclick = () => { log.innerHTML = ""; messages.length = 0; state = {}; input.focus(); };
 
   // 欢迎状态：当前数据状态 + 能力边界（评估：聊天初始区域不应为空）
   (async function welcome() {

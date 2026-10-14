@@ -96,7 +96,22 @@ def _keyword_intent(q):
     return None
 
 
-# 强关键词（无歧义）优先于分类器；顺序即优先级
+# 表达适应：繁简/常见错字/中英术语归一
+_NORM = {"未來": "未来", "兩天": "两天", "兩周": "两周", "兩天": "两天", "採摘": "采摘", "採": "采",
+         "澆": "浇", "嗎": "吗", "會": "会", "週": "周", "號": "号", "天氣": "天气", "氣溫": "气温",
+         "霜凍": "霜冻", "風險": "风险", "預報": "预报", "灌溉": "灌溉",
+         "明夭": "明天", "今夭": "今天", "霜栋": "霜冻",
+         "risk": "风险", "frost": "霜冻", "rain": "降雨", "temperature": "气温", "weather": "天气",
+         "irrigation": "灌溉", "harvest": "采摘", "drought": "干旱", "heat": "高温", "insurance": "保险"}
+
+
+def _normalize(q):
+    q = q or ""
+    for k, v in _NORM.items():
+        q = q.replace(k, v)
+    return q
+
+
 STRONG = [
     ("寒潮", "frost"), ("冷空气", "frost"), ("霜冻", "frost"), ("倒春寒", "frost"), ("防冻", "frost"), ("降温", "frost"),
     ("高温", "heat"), ("遮阳", "heat"), ("热害", "heat"), ("灼伤", "heat"),
@@ -379,17 +394,50 @@ def _final_guard(q, txt):
     return txt
 
 
-def answer(question, context=None, history=None):
-    r = _answer_impl(question, context, history)
+def _extract_state(q, history, r):
+    """从问题/回答中抽取结构化会话槽位（供前端回传，实现实体级上下文）。"""
+    st = {"intent": r.get("intent")}
     try:
-        if isinstance(r, dict) and isinstance(r.get("text"), str):
-            r["text"] = _final_guard(question or "", r["text"])
+        from . import nlg
+        ad = nlg._parse_abs_date(q)
+        if ad is None and r.get("text"):
+            m = re.search(r"(20\d{2}-\d{2}-\d{2})", r["text"])
+            if m:
+                import datetime as _dt
+                ad = _dt.date.fromisoformat(m.group(1))
+        if ad is not None:
+            st["active_date"] = ad.isoformat()
+    except Exception:  # noqa: BLE001
+        pass
+    if re.search(r"json", q or "", re.I):
+        st["format"] = "json"
+    elif any(k in (q or "") for k in ["表格", "markdown", "Markdown"]):
+        st["format"] = "table"
+    return st
+
+
+def answer(question, context=None, history=None, state=None):
+    q = _normalize(question)
+    r = _answer_impl(q, context, history, state)
+    try:
+        st = _extract_state(q, history, r)
+        # JSON 输出：给出结构化对象（数值与基础 API 一致）
+        if st.get("format") == "json":
+            from . import nlg
+            ctx = nlg.classify_ctx(_load_data(), q)
+            obj = nlg.structured_answer(ctx, q)
+            if obj is not None:
+                r["text"] = json.dumps(obj, ensure_ascii=False)
+                r["format"] = "json"
+        if isinstance(r.get("text"), str) and r.get("format") != "json":
+            r["text"] = _final_guard(q, r["text"])
+        r["state"] = st
     except Exception:  # noqa: BLE001
         pass
     return r
 
 
-def _answer_impl(question, context=None, history=None):
+def _answer_impl(question, context=None, history=None, state=None):
     data = _load_data()
     q0 = (question or "").strip()
     if not q0:
@@ -420,12 +468,24 @@ def _answer_impl(question, context=None, history=None):
     if q0 in CONTINUE and not prev:
         return _reply("请先告诉我想了解哪方面（如：今天风险、要不要防冻、先采哪块地），我再继续。")
 
-    carry = ""
-    mm = re.search(r"(20\d{2}-\d{2}-\d{2})", prev + " " + prev_assistant) or \
-        re.search(r"(\d{1,2})月(\d{1,2})日", prev_assistant)
-    if mm:
-        carry = mm.group(1) if (mm.lastindex or 1) <= 1 else f"{season.today().year}年{int(mm.group(1))}月{int(mm.group(2))}日"
-    pronoun = any(k in question for k in ["那一天", "那天", "它的", "这个", "该日", "它"])
+    state = dict(state or {})
+    active_date = state.get("active_date")
+    mrel = re.search(r"(前一天|前一日|昨天|昨日)", question)
+    mrel2 = re.search(r"(后一天|次日|第二天)", question)
+    if active_date and (mrel or mrel2):
+        try:
+            d0 = datetime.date.fromisoformat(str(active_date)[:10])
+            active_date = (d0 + datetime.timedelta(days=(-1 if mrel else 1))).isoformat()
+            state["active_date"] = active_date
+        except Exception:  # noqa: BLE001
+            pass
+    carry = active_date or ""
+    if not carry:
+        mm = re.search(r"(20\d{2}-\d{2}-\d{2})", prev + " " + prev_assistant) or \
+            re.search(r"(\d{1,2})月(\d{1,2})日", prev_assistant)
+        if mm:
+            carry = mm.group(1) if (mm.lastindex or 1) <= 1 else f"{season.today().year}年{int(mm.group(1))}月{int(mm.group(2))}日"
+    pronoun = any(k in question for k in ["那一天", "那天", "它的", "这个", "该日", "它", "前一天", "后一天", "次日"])
     # 指代"那一天采取什么措施"：直接按上一目标日给行动
     if pronoun and carry and any(k in question for k in ["措施", "怎么办", "做什么", "咋办", "应对", "怎么处理"]):
         dd = next((d for d in data["days"] if d["date"] == carry), None)

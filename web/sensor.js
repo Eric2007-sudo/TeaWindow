@@ -68,5 +68,5 @@
     }
   }
   renderRealtime();
-  setInterval(renderRealtime, 10000);
+  setInterval(() => { if (!document.hidden) renderRealtime(); }, 15000);
 })();

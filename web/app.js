@@ -52,6 +52,10 @@
   ];
   const notes = [];
   if (!online) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e08a3c"><div class="k">数据来源</div><div class="v" style="font-size:15px;color:#e08a3c">⚠️ 离线/缓存（演示）数据，非实时；行动建议请以在线服务与官方预警为准</div></div>`);
+  const fetched = (D.meta && (D.meta.fetched_at || D.meta.updated)) || "";
+  let ageMin = null;
+  if (fetched) { const t = new Date(String(fetched).replace(" ", "T")); if (!isNaN(t)) ageMin = Math.round((Date.now() - t) / 60000); }
+  if (ageMin != null && ageMin > 150) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据新鲜度</div><div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据约 ${ageMin} 分钟前获取（可能已过期）；请以最新预报与官方预警为准</div></div>`);
   if (ageDays > 2) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据时效</div><div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据日 ${cur.date}（已 ${ageDays} 天），行动建议请谨慎，以实况与官方预警为准</div></div>`);
   if (offSeason) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#4aa8ff"><div class="k">季节提示</div><div class="v" style="font-size:15px;color:#cfe0ee">当前为非春采期（春采季 3–4 月）：采摘窗口/排班仅供参考，请以园间养护为主</div></div>`);
   document.getElementById("cards").innerHTML = notes.join("") + cards.map(c =>
@@ -266,7 +270,8 @@
       const st = d.stations || {};
       const keys = Object.keys(st);
       if (!keys.length) {
-        box.innerHTML = '<div class="note">暂无传感器上报。可通过 <a href="sensor.html">sensor.html</a> 或 POST /api/sensor 接入。</div>';
+        box.innerHTML = '<div class="note">' + ((d.message || "尚未接入现场传感器") + '。可通过 <a href="sensor.html">sensor.html</a> 或 POST /api/sensor 接入。') + '</div>';
+        document.getElementById("sensor-note").textContent = "现场传感器：" + (d.status === "no_sensors" ? "尚未接入（0 个站点）" : "暂无数据");
         return;
       }
       box.innerHTML = keys.map(k => {
@@ -277,8 +282,9 @@
         if (x.precip != null) parts.push(`雨 ${x.precip}mm`);
         return `<div class="card"><div class="k">${esc(k)}</div><div class="v" style="font-size:18px">${parts.join(" · ") || "–"}</div><div class="s">${esc(x.ts || "")}</div></div>`;
       }).join("");
-      document.getElementById("sensor-note").textContent = `共 ${d.n} 条上报 · 更新于 ${d.updated}（仅数值，公开只读）`;
+      document.getElementById("sensor-note").textContent = `共 ${d.n} 条上报 · 最新观测 ${d.latest_observation_at || "–"} · 服务时间 ${d.server_time || d.updated}（仅数值，公开只读）`;
     } catch (e) { box.innerHTML = '<div class="note">（离线或服务不可用）</div>'; }
   }
-  renderSensor(); setInterval(renderSensor, 20000);
+  renderSensor();
+  setInterval(() => { if (!document.hidden) renderSensor(); }, 15000);
 })();
