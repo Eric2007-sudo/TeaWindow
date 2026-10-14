@@ -45,6 +45,15 @@ async def _lifespan(app):  # noqa: ARG001
     if not os.path.exists(DATA_JSON):
         print("[serve] 首次启动，生成数据 ...")
         _refresh(True)
+    # 预加载模型（意图 ONNX + 检索索引），避免首个请求触发冷加载超时
+    try:
+        from qa import intent_onnx, retriever
+        intent_onnx.available()
+        if retriever.available():
+            retriever._index_vectors()
+        print("[serve] 模型预热完成")
+    except Exception as e:  # noqa: BLE001
+        print("[serve] 模型预热跳过:", e)
     yield
 
 
@@ -316,7 +325,7 @@ def _ask(q, engine, history=None):
     from qa import engine as qa_engine
     try:
         fut = _ASK_EXEC.submit(qa_engine.answer, q, _context(), history or [])
-        base = fut.result(timeout=float(os.environ.get("ASK_TIMEOUT", "8")))
+        base = fut.result(timeout=float(os.environ.get("ASK_TIMEOUT", "20")))
     except _cf.TimeoutError:
         base = {"engine": "teawindow-own", "mode": "rules", "intent": "timeout", "confidence": 0.0,
                 "backend": None, "retrieval": None,
