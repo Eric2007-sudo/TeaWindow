@@ -628,6 +628,45 @@ def _require_sensor(request):
     raise HTTPException(403, "forbidden: sensor token required")
 
 
+def _verify_device(request, body: bytes):
+    """设备签名校验（HMAC-SHA256 + 时间戳 + nonce 防重放）。
+    签名规范：X-Signature = HMAC_SHA256(sha256(token),
+        "{X-Timestamp}\\n{X-Nonce}\\n{METHOD}\\n{PATH}\\n{sha256(body)}")
+    全部头缺失 → 返回 None（回退共享令牌）。任一头缺失或校验失败 → 401/409。
+    """
+    import hashlib
+    import hmac
+    did = request.headers.get("X-Device-Id")
+    ts = request.headers.get("X-Timestamp")
+    nonce = request.headers.get("X-Nonce")
+    sig = request.headers.get("X-Signature")
+    if not any([did, ts, nonce, sig]):
+        return None
+    if not (did and ts and nonce and sig):
+        raise HTTPException(401, "device signature headers incomplete")
+    key = store.device_hash(did)
+    if not key:
+        raise HTTPException(401, "unknown or revoked device")
+    try:
+        t = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        now = datetime.datetime.now(t.tzinfo) if t.tzinfo else datetime.datetime.now()
+        if abs((now - t).total_seconds()) > 300:
+            raise HTTPException(401, "timestamp skew too large")
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001
+        raise HTTPException(401, "bad X-Timestamp")
+    body_hash = hashlib.sha256(body or b"").hexdigest()
+    canonical = "\n".join([ts, nonce, request.method, request.url.path, body_hash])
+    want = hmac.new(key.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(want, sig):
+        raise HTTPException(401, "bad signature")
+    if not store.use_nonce(nonce, did):
+        raise HTTPException(409, "replay detected (nonce reused)")
+    store.audit("device:" + did, "write", request.url.path)
+    return did
+
+
 def _valid_sensor(req):
     import re as _re
     sid = (req.station_id or "").strip()
@@ -659,8 +698,10 @@ def _valid_sensor(req):
 
 
 @app.post("/api/sensor")
-def sensor(request: Request, req: SensorReq):
-    _require_sensor(request)
+async def sensor(request: Request, req: SensorReq):
+    body = await request.body()
+    if _verify_device(request, body) is None:
+        _require_sensor(request)
     ip = request.client.host if request.client else "global"
     _rate_limit(ip, limit=int(os.environ.get("SENSOR_RPM", "120")))
     accepted, n = store.add_sensor([_valid_sensor(req)])
@@ -668,8 +709,10 @@ def sensor(request: Request, req: SensorReq):
 
 
 @app.post("/api/sensor/batch")
-def sensor_batch(request: Request, req: SensorBatch):
-    _require_sensor(request)
+async def sensor_batch(request: Request, req: SensorBatch):
+    body = await request.body()
+    if _verify_device(request, body) is None:
+        _require_sensor(request)
     ip = request.client.host if request.client else "global"
     _rate_limit(ip, limit=int(os.environ.get("SENSOR_RPM", "120")))
     if not req.readings:
@@ -849,8 +892,10 @@ def devices(request: Request):
 
 # ---- 田间结果（前瞻性盲测真值）+ 盲测评估 ----
 @app.post("/api/outcome")
-def outcome(request: Request, req: OutcomeReq):
-    _require_sensor(request)   # 设备令牌或传感器令牌
+async def outcome(request: Request, req: OutcomeReq):
+    body = await request.body()
+    if _verify_device(request, body) is None:
+        _require_sensor(request)   # 设备令牌/签名 或 传感器令牌
     import datetime as _dt
     try:
         _dt.date.fromisoformat(req.date)
@@ -1041,6 +1086,8 @@ def _notify_alerts(force=False):
                              "new": sorted(codes - prev), "active": sorted(codes),
                              "alerts": cur})
         store.set_alerts_state(codes)
+        store.add_alert_delivery(sorted(codes - prev), bool(res.get("sent")),
+                                 str(res.get("reason") or res.get("status") or ""))
         return {"notified": True, "new": sorted(codes - prev), **res}
     store.set_alerts_state(codes)
     return {"notified": False, "reason": "no_change", "active": sorted(codes)}
@@ -1052,7 +1099,8 @@ def alerts():
     cur = _collect_alerts()
     return {"alerts": cur, "count": len(cur), "server_time": season.now().isoformat(timespec="seconds"),
             "webhook_configured": bool(ALERT_WEBHOOK_URL),
-            "notified": store.get_alerts_state()}
+            "notified": store.get_alerts_state(),
+            "last_delivery": store.last_alert_delivery()}
 
 
 @app.post("/api/alerts/test")

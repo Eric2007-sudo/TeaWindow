@@ -742,3 +742,57 @@ def test_persistence_and_cold_hot_metrics(monkeypatch):
     assert "db" in p and "counts" in p and "retention_hint" in p
     m = c.get("/api/metrics", headers={"X-Admin-Token": "adm"}).json()
     assert "cold_p95_ms" in m and "hot_p95_ms" in m and "uptime_s" in m
+
+
+# ---------------- 设备签名（HMAC）+ nonce 防重放 ----------------
+def _signed(device_id, token, body_bytes, path="/api/sensor", ts=None, nonce=None):
+    import hashlib
+    import hmac
+    import datetime
+    import uuid
+    ts = ts or datetime.datetime.now().isoformat(timespec="seconds")
+    nonce = nonce or uuid.uuid4().hex
+    key = hashlib.sha256(token.encode()).hexdigest()
+    canon = "\n".join([ts, nonce, "POST", path, hashlib.sha256(body_bytes).hexdigest()])
+    sig = hmac.new(key.encode(), canon.encode(), hashlib.sha256).hexdigest()
+    return {"Content-Type": "application/json", "X-Device-Id": device_id, "X-Timestamp": ts,
+            "X-Nonce": nonce, "X-Signature": sig}
+
+
+def test_device_signature_ok_and_replay_blocked(monkeypatch):
+    import serve
+    import json
+    import uuid
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    tok = c.post("/api/device/register?device_id=SIG-1", headers={"X-Admin-Token": "adm"}).json()["token"]
+    body = {"station_id": "SIGST", "ts": "2026-10-14T10:00:00+08:00", "temp": 16.0}
+    raw = json.dumps(body, separators=(",", ":")).encode()
+    nonce = uuid.uuid4().hex
+    h = _signed("SIG-1", tok, raw, nonce=nonce)
+    assert c.post("/api/sensor", content=raw, headers=h).status_code == 200
+    # 同一 nonce 重放 → 409
+    assert c.post("/api/sensor", content=raw, headers=h).status_code == 409
+
+
+def test_device_signature_bad_and_stale(monkeypatch):
+    import serve
+    import json
+    import datetime
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    tok = c.post("/api/device/register?device_id=SIG-2", headers={"X-Admin-Token": "adm"}).json()["token"]
+    body = {"station_id": "SIGST2", "ts": "2026-10-14T10:00:00+08:00", "temp": 16.0}
+    raw = json.dumps(body, separators=(",", ":")).encode()
+    h = _signed("SIG-2", tok, raw)
+    h["X-Signature"] = "0" * 64
+    assert c.post("/api/sensor", content=raw, headers=h).status_code == 401
+    old = (datetime.datetime.now() - datetime.timedelta(hours=2)).isoformat(timespec="seconds")
+    h2 = _signed("SIG-2", tok, raw, ts=old)
+    assert c.post("/api/sensor", content=raw, headers=h2).status_code == 401
+
+
+def test_nonce_dedup_store():
+    import store
+    assert store.use_nonce("n-uniq-test-1", "d1") is True
+    assert store.use_nonce("n-uniq-test-1", "d1") is False

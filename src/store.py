@@ -96,6 +96,8 @@ def _ddl():
         "CREATE TABLE IF NOT EXISTS refresh_state(k TEXT PRIMARY KEY, ts TEXT, status TEXT, duration_s REAL, error TEXT, last_success TEXT, next_planned TEXT)",
         f"CREATE TABLE IF NOT EXISTS verifications(id {ai}, ts TEXT, build TEXT, sha256 TEXT, summary TEXT, payload TEXT)",
         "CREATE TABLE IF NOT EXISTS alerts_state(k TEXT PRIMARY KEY, ts TEXT, codes TEXT)",
+        "CREATE TABLE IF NOT EXISTS nonces(nonce TEXT PRIMARY KEY, ts TEXT, device_id TEXT)",
+        f"CREATE TABLE IF NOT EXISTS alert_deliveries(id {ai}, ts TEXT, new_codes TEXT, ok INTEGER, detail TEXT)",
     ]
 
 
@@ -411,6 +413,57 @@ def get_alerts_state():
     except Exception:  # noqa: BLE001
         codes = []
     return {"ts": row[0], "codes": codes}
+
+
+# ---------------- 设备签名（HMAC）+ nonce 防重放 ----------------
+def device_hash(device_id):
+    """返回未撤销设备的 token_hash（=sha256(token)，同时用作 HMAC 密钥）。"""
+    if not device_id:
+        return None
+    with _LOCK:
+        row = _db().execute("SELECT token_hash, revoked FROM devices WHERE device_id=?", (device_id,)).fetchone()
+    if not row or row[1]:
+        return None
+    return row[0]
+
+
+def use_nonce(nonce, device_id="", ttl_s=600):
+    """记录 nonce；重复使用返回 False。并清理过期 nonce。"""
+    import datetime
+    if not nonce:
+        return False
+    now = datetime_now()
+    cutoff = (datetime.datetime.fromisoformat(now) - datetime.timedelta(seconds=ttl_s)).isoformat(timespec="seconds")
+    with _LOCK:
+        c = _db()
+        try:
+            c.execute("INSERT INTO nonces(nonce,ts,device_id) VALUES(?,?,?)", (nonce[:80], now, (device_id or "")[:40]))
+            c.commit()
+        except Exception:  # noqa: BLE001
+            return False
+        try:
+            c.execute("DELETE FROM nonces WHERE ts < ?", (cutoff,))
+            c.commit()
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
+def add_alert_delivery(new_codes, ok, detail=""):
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT INTO alert_deliveries(ts,new_codes,ok,detail) VALUES(?,?,?,?)",
+                  (datetime_now(), json.dumps(sorted(new_codes or []), ensure_ascii=False), 1 if ok else 0, (detail or "")[:200]))
+        c.commit()
+        return c.execute("SELECT COUNT(*) FROM alert_deliveries").fetchone()[0]
+
+
+def last_alert_delivery():
+    with _LOCK:
+        row = _db().execute("SELECT ts,new_codes,ok,detail FROM alert_deliveries ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    return {"ts": row[0], "new_codes": row[1], "ok": bool(row[2]), "detail": row[3]}
 
 
 # ---------------- 盲测评估：预测快照 × 田间结果（事件级） ----------------

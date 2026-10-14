@@ -27,3 +27,9 @@
 
 ## 五、仍未完成
 - 现场传感器真值；设备签名+nonce；提前期更早年份与田间真值；物候超越基线。
+
+## 六、验证归档已运行 + 设备签名（本轮）
+- **验证归档已入库**（Postgres）：触发一次刷新 → `/api/forecast/verify/history` 出现 1 条（含 build/sha256/汇总），随 6h 任务/外部工作流累积并跨重部署保留。
+- **设备签名 + nonce 防重放**：`X-Device-Id/X-Timestamp/X-Nonce/X-Signature`（HMAC-SHA256），时间偏差 ≤300s，nonce 复用 → 409；`nonces` 表 TTL 清理；成功写审计。
+- **告警投递记录**：`alert_deliveries` 表记录每次推送的 new_codes/ok/详情；`/api/alerts` 返回 `last_delivery`（webhook 未配置时为 not sent）。
+- 测试 103 → **106**。
