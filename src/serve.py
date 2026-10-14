@@ -45,24 +45,28 @@ async def _lifespan(app):  # noqa: ARG001
     if not os.path.exists(DATA_JSON):
         print("[serve] 首次启动，生成数据 ...")
         _refresh(True)
-    # 预加载模型（意图 ONNX + 检索索引），避免首个请求触发冷加载超时
-    try:
-        from qa import intent_onnx, retriever
-        intent_onnx.available()
-        if retriever.available():
-            retriever._index_vectors()
-        print("[serve] 模型预热完成")
-    except Exception as e:  # noqa: BLE001
-        print("[serve] 模型预热跳过:", e)
-    # 若尚无数据版本，启动时落一个初始快照（数据血缘）
-    try:
-        if store.version_count() == 0 and os.path.exists(DATA_JSON):
-            _save_snapshot(note="startup-existing（沿用已有加工数据，非新抓取）")
-            print("[serve] 初始数据版本已记录（沿用已有数据）")
-        if store.get_refresh_state().get("status") == "unknown":
-            store.set_refresh_state("startup", 0.0)   # 标记实例已启动（非 unknown）
-    except Exception as e:  # noqa: BLE001
-        print("[serve] 初始快照状态跳过:", e)
+
+    def _boot_tasks():
+        # 预加载模型（意图 ONNX + 检索索引），避免首个请求触发冷加载超时
+        try:
+            from qa import intent_onnx, retriever
+            intent_onnx.available()
+            if retriever.available():
+                retriever._index_vectors()
+            print("[serve] 模型预热完成")
+        except Exception as e:  # noqa: BLE001
+            print("[serve] 模型预热跳过:", e)
+        # 记录初始数据版本与刷新状态（数据血缘）
+        try:
+            if store.version_count() == 0 and os.path.exists(DATA_JSON):
+                _save_snapshot(note="startup-existing（沿用已有加工数据，非新抓取）")
+                print("[serve] 初始数据版本已记录（沿用已有数据）")
+            if store.get_refresh_state().get("status") == "unknown":
+                store.set_refresh_state("startup", 0.0)
+        except Exception as e:  # noqa: BLE001
+            print("[serve] 初始快照状态跳过:", e)
+
+    threading.Thread(target=_boot_tasks, daemon=True).start()   # 后台预热，避免阻塞启动/健康检查
     yield
 
 
@@ -346,13 +350,24 @@ def health():
         retr = retriever.backend()
     except Exception:  # noqa: BLE001
         retr = None
-    fr = _freshness() if os.path.exists(DATA_JSON) else {}
+    age = None
+    fetched = None
+    try:
+        if os.path.exists(DATA_JSON):
+            meta = (_load().get("meta", {}) or {})
+            fetched = meta.get("fetched_at") or meta.get("updated")
+            fdt = datetime.datetime.fromisoformat(str(fetched))
+            now = season.now()
+            if fdt.tzinfo is None:
+                now = now.replace(tzinfo=None)
+            age = round((now - fdt).total_seconds() / 60.0, 1)
+    except Exception:  # noqa: BLE001
+        pass
     return {"status": "ok", "data_ready": os.path.exists(DATA_JSON),
             "has_llm_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
-            "retrieval": retr,
-            "fetched_at": fr.get("fetched_at"), "age_minutes": fr.get("age_minutes"),
-            "stale": fr.get("stale"), "build": fr.get("build"),
-            "refresh": fr.get("refresh")}
+            "retrieval": retr, "fetched_at": fetched, "age_minutes": age,
+            "stale": bool(age is not None and age > STALE_MINUTES),
+            "build": (os.environ.get("RENDER_GIT_COMMIT", "") or "")[:12]}
 
 
 @app.get("/api/overview")
