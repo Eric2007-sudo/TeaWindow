@@ -230,6 +230,14 @@ def save_snapshot(meta, days):
     """meta: {ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,build,note}; days: [{date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level}]"""
     with _LOCK:
         c = _db()
+        # 内容去重：与上一条 (raw_sha256_full, fetched_at, model) 完全相同的快照不重复入库
+        try:
+            prev = c.execute("SELECT id,raw_sha256_full,fetched_at,model FROM data_versions ORDER BY id DESC LIMIT 1").fetchone()
+            if prev and prev[1] and prev[1] == meta.get("raw_sha256_full") \
+                    and prev[2] == meta.get("fetched_at") and prev[3] == meta.get("model"):
+                return prev[0]
+        except Exception:  # noqa: BLE001
+            pass
         cur = c.execute("""INSERT INTO data_versions(ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,n_days,build,note,upstream_url,params,raw_sha256_full)
                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (meta.get("ts"), meta.get("source"), meta.get("model"), meta.get("gen_time"),

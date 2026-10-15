@@ -146,7 +146,7 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 
 - **自播放演示页**（录屏用）：`web/demo.html`（自动巡览 + 字幕，空格暂停，←/→ 切换）
 - **一键打包**：`dist/TeaWindow_v1.3.zip`；**GitHub Release**：https://github.com/Eric2007-sudo/TeaWindow/releases/tag/v1.3
-- **测试与 CI**：`tests/`（pytest，**115 passed**）、`.github/workflows/test.yml`
+- **测试与 CI**：`tests/`（pytest，**125 passed**）、`.github/workflows/test.yml`
 - **发布一致性自检**：`src/deploy_check.py`、`.github/workflows/deploy_check.yml`、`/api/ready`、`/api/alerts`
 - **持久化（已接入）**：Render Postgres + `DATABASE_URL`；`/api/persistence`；`src/persistence_check.py`（跨重部署保留验收 PASS）
 - **外部定时器**：`.github/workflows/verify.yml`（每 6h 触发验证刷新）；`.github/workflows/refresh.yml`（每日刷新）
@@ -155,6 +155,7 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 - **数据治理与接口**：`submit/16_数据治理与接口.md`（提前期真实误差 `/api/forecast/verify`、数据版本 `/api/data/versions`、设备凭证/审计、田间结果 `/api/outcome`、`/api/metrics`、`/api/updates`）
 - **提前期误差报告**：`report/forecast_verify.md`（Open-Meteo Previous Runs vs ERA5，1/3/7 天）
 - **当前状态评估（自评）**：`report/round15_live_assessment.md`（对照第七轮验收；刷新闭环/decision_ready/钉钉送达/JSON 跨轮/否定改口已闭环）
+- **提交前最终整改**：`report/round16_final.md`（含问答分句规划、茶农语料 GPU 重训、Web/演示视频全量复检、全量模拟评测 97.2%）
 - **告警渠道**：`ALERT_WEBHOOK_URL` + `ALERT_WEBHOOK_KIND`（generic/slack/feishu/**dingtalk**，支持加签 `ALERT_WEBHOOK_SECRET`）
 - **外部定时刷新**：`.github/workflows/refresh.yml`（每日 06:00 CST 调用线上 `/api/refresh`）
 - **许可证**：代码 **MIT**（`LICENSE`）· 数据与文档 **CC BY 4.0**（`LICENSE-DATA.md`）

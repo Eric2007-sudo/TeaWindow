@@ -647,6 +647,19 @@ def test_store_postgres_sql_translation(monkeypatch):
         assert f"ON CONFLICT (k)" in s and "EXCLUDED.blob" in s, t
 
 
+def test_version_content_dedup():
+    import store
+    meta = {"ts": "2026-10-15 12:00:00", "source": "test", "model": "teawindow-pipeline",
+            "gen_time": "2026-10-15 12:00:00", "fetched_at": "2026-10-15 12:00:00",
+            "lat": 30.2, "lon": 120.1, "raw_sha256": "abc", "build": "test", "note": "dedup",
+            "upstream_url": "u", "params": "{}", "raw_sha256_full": "FULLHASH-DEDUP-TEST"}
+    days = [{"date": "2026-10-16", "tmin": 1.0, "tmax": 2.0, "precip": 0.0,
+             "p_frost": 0.1, "p_heat": 0.0, "risk_R": 0.1, "risk_level": "低"}]
+    a = store.save_snapshot(meta, days)
+    b = store.save_snapshot(meta, days)
+    assert a == b      # 相同 (hash, fetched_at, model) 不重复入库
+
+
 # ---------------- 第六/七轮：意图稳定 / 状态合并 / 运行问答 / 格式 / 英文 ----------------
 def test_week_list_intents_and_stable_conf():
     import qa.engine as e
