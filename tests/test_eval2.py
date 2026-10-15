@@ -757,6 +757,22 @@ def test_lineage_question_routes_to_ops():
     assert r["intent"] == "ops"      # 血缘深答应路由到 ops，而非通用来源模板
 
 
+def test_relative_date_not_hijacked_by_prev():
+    import qa.engine as e
+    hist = [{"role": "user", "content": "你们用什么模型？"}, {"role": "assistant", "content": "x"}]
+    r = e.answer("今天有风险吗？", None, hist, {})
+    assert r["intent"] == "risk_today"      # 含"今天"的独立问题不应被上一轮"模型"带偏
+
+
+def test_stale_degrade_only_for_action_intents():
+    import qa.engine as e
+    # 信息类（模型/来源）不应加过期降级前缀；行动类应加（用旧数据本地复现 stale）
+    r_model = e.answer("你们用什么模型？")
+    assert "⚠️" not in r_model["text"]
+    r_risk = e.answer("今天有风险吗？")
+    assert "⚠️" in r_risk["text"] or "风险" in r_risk["text"]
+
+
 def test_english_halflanguage_rejected():
     import qa.engine as e
     r = e.answer("Tomorrow forecast frost risk and temperature high?")

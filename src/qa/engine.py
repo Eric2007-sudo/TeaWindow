@@ -720,7 +720,9 @@ def _answer_impl(question, context=None, history=None, state=None):
     if _off_q is not None:
         try:
             target_q = (season.today() + datetime.timedelta(days=int(_off_q))).isoformat()
-            qt = question + " " + target_q + ((" " + prev) if prev else "")
+            qt = question + " " + target_q
+            if (is_follow or pronoun) and prev:      # 仅追问才拼接上一轮主题，避免带偏独立问题
+                qt += " " + prev
             state["active_date"] = target_q
         except Exception:  # noqa: BLE001
             pass

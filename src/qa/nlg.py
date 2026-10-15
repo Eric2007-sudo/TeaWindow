@@ -902,6 +902,9 @@ _DEGRADE_REPL = [("建议先测量根层墒情，暂不直接灌溉", "请先测
                  ("达标芽叶优先抢采", "核验后再安排")]
 
 
+_ACTION_INTENTS = {"frost", "heat", "drought", "rain", "decision", "pick_window", "schedule", "risk_today"}
+
+
 def _degrade(text, age):
     head = f"⚠️ 数据约 {age} 分钟前获取（可能过期）：以下仅为参考，请先核验最新预报与上游差异后再行动。"
     for a, b in _DEGRADE_REPL:
@@ -919,7 +922,7 @@ def compose(intent, q, sl, data):
         if dd is not None:
             t, ch = dd
             age = _stale_age(data)
-            if age is not None:
+            if age is not None and intent in _ACTION_INTENTS:
                 t, ch = _degrade(t, age), list(ch) + ["时效: 数据可能过期(降级为核验)"]
             return {"text": season.clean_text(t), "chain": ch, "detail": detail}
     if intent in HANDLERS and HANDLERS[intent]:
@@ -949,6 +952,9 @@ def compose(intent, q, sl, data):
                 text += " " + season.care_hint()
             if detail:
                 text += " 依据：复合风险 = 倒春寒/高温/干旱 取最大；R≥0.5 记风险日。"
+            _age = _stale_age(data)
+            if _age is not None:
+                text = _degrade(text, _age)
             return {"text": text, "chain": ["数据: Open-Meteo+集合", "风险: 专家规则R（展示值）；模型: GBDT概率(辅助)"], "detail": detail}
         n7 = fc[:7]
         mx = max(n7, key=lambda x: (x.get("risk_R") or 0)) if n7 else cur
@@ -973,7 +979,7 @@ def compose(intent, q, sl, data):
     else:
         text, chains = fallback(ctx, q, detail)
     age = _stale_age(data)
-    if age is not None:
+    if age is not None and intent in _ACTION_INTENTS:   # 仅行动类建议降级；信息类（模型/来源/运行/保险/开采期）不降级
         text = _degrade(text, age)
         chains = list(chains) + ["时效: 数据可能过期(降级为核验)"]
     return {"text": season.clean_text(text), "chain": chains, "detail": detail}
