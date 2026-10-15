@@ -105,6 +105,7 @@ def _ddl():
         "CREATE TABLE IF NOT EXISTS nonces(nonce TEXT PRIMARY KEY, ts TEXT, device_id TEXT)",
         f"CREATE TABLE IF NOT EXISTS alert_deliveries(id {ai}, ts TEXT, new_codes TEXT, ok INTEGER, detail TEXT)",
         "CREATE TABLE IF NOT EXISTS data_json(k TEXT PRIMARY KEY, ts TEXT, blob TEXT)",
+        "CREATE TABLE IF NOT EXISTS raw_cache(k TEXT PRIMARY KEY, ts TEXT, blob TEXT)",
     ]
 
 
@@ -496,6 +497,22 @@ def get_data_json():
     with _LOCK:
         row = _db().execute("SELECT ts,blob FROM data_json WHERE k='main'").fetchone()
     return {"ts": row[0], "blob": row[1]} if row else None
+
+
+# ---------------- 原始缓存（data/raw/*.json）持久化，跨实例轮换不丢 ----------------
+def set_raw(k, blob):
+    import time as _t
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO raw_cache(k,ts,blob) VALUES(?,?,?)",
+                  (k, str(int(_t.time())), blob))
+        c.commit()
+
+
+def get_raw(k):
+    with _LOCK:
+        row = _db().execute("SELECT blob FROM raw_cache WHERE k=?", (k,)).fetchone()
+    return row[0] if row else None
 
 
 # ---------------- 盲测评估：预测快照 × 田间结果（事件级） ----------------

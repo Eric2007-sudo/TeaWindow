@@ -48,6 +48,7 @@ async def _lifespan(app):  # noqa: ARG001
 
     def _boot_tasks():
         _sync_data_from_db()   # 先把 DB 中更新的构建产物同步回本地（跨实例轮换）
+        _ensure_raw()          # 确保原始 archive/forecast 缓存存在（跨实例轮换、archive 限流回退）
         # 预加载模型（意图 ONNX + 检索索引），避免首个请求触发冷加载超时
         try:
             from qa import intent_onnx, retriever
@@ -352,6 +353,7 @@ def _refresh(do_fetch=True, light=True):
             store.set_data_json(json.loads(blob).get("meta", {}).get("updated") or season.now().strftime("%Y-%m-%d %H:%M:%S"), blob)
         except Exception as e:  # noqa: BLE001
             print("[serve] data.json 入库跳过:", e)
+        _persist_raw()   # 原始缓存入库，跨实例轮换后可恢复（避免 archive 429 导致刷新失败）
         try:   # 刷新后立即重跑漂移比对，保证 decision_ready 就绪
             _compare_upstream(force=True)
         except Exception as e:  # noqa: BLE001
@@ -389,6 +391,67 @@ def _sync_data_from_db():
             print("[serve] 已从数据库同步 data.json:", dj["ts"])
     except Exception as e:  # noqa: BLE001
         print("[serve] data.json 同步跳过:", e)
+
+
+def _ensure_raw():
+    """确保 data/raw 下有 archive/forecast 缓存（跨实例轮换）：优先 DB，其次由现有构建产物重建。"""
+    raw = os.path.join(ROOT, "data", "raw")
+    os.makedirs(raw, exist_ok=True)
+    ap = os.path.join(raw, "weather_archive.json")
+    fp = os.path.join(raw, "weather_forecast.json")
+    amap = {"temperature_2m_max": "tmax", "temperature_2m_min": "tmin", "temperature_2m_mean": "tmean",
+            "precipitation_sum": "precip", "relative_humidity_2m_mean": "rh", "et0_fao_evapotranspiration": "et0",
+            "sunshine_duration": "sun_s", "wind_speed_10m_max": "wind", "soil_moisture_0_to_7cm_mean": "soil",
+            "shortwave_radiation_sum": None}
+    try:
+        if not os.path.exists(ap):
+            blob = store.get_raw("weather_archive.json")
+            if blob:
+                open(ap, "w", encoding="utf-8").write(blob)
+                print("[serve] 从数据库恢复 archive 缓存")
+            else:
+                hist = [x for x in _load().get("days", []) if x.get("source") == "history"]
+                if hist:
+                    arc = {"daily": {"time": [x["date"] for x in hist]}, "_fallback": "from-build"}
+                    for k, s in amap.items():
+                        arc["daily"][k] = [x.get(s) if s else None for x in hist]
+                    blob = json.dumps(arc, ensure_ascii=False)
+                    open(ap, "w", encoding="utf-8").write(blob)
+                    store.set_raw("weather_archive.json", blob)
+                    print("[serve] 由构建历史重建 archive 缓存")
+        if not os.path.exists(fp):
+            blob = store.get_raw("weather_forecast.json")
+            if blob:
+                open(fp, "w", encoding="utf-8").write(blob)
+                print("[serve] 从数据库恢复 forecast 缓存")
+            else:
+                fcs = [x for x in _load().get("days", []) if x.get("source") == "forecast"]
+                if fcs:
+                    out = {"latitude": 30.2139, "longitude": 120.0961, "timezone": "Asia/Shanghai",
+                           "_source": "from-build",
+                           "daily": {"time": [x["date"] for x in fcs],
+                                     "temperature_2m_max": [x.get("tmax") for x in fcs],
+                                     "temperature_2m_min": [x.get("tmin") for x in fcs],
+                                     "temperature_2m_mean": [x.get("tmean") for x in fcs],
+                                     "precipitation_sum": [x.get("precip") for x in fcs],
+                                     "relative_humidity_2m_mean": [x.get("rh") for x in fcs]}}
+                    blob = json.dumps(out, ensure_ascii=False)
+                    open(fp, "w", encoding="utf-8").write(blob)
+                    store.set_raw("weather_forecast.json", blob)
+                    print("[serve] 由构建产物重建 forecast 缓存")
+    except Exception as e:  # noqa: BLE001
+        print("[serve] raw 缓存确保跳过:", e)
+
+
+def _persist_raw():
+    for fn in ("weather_archive.json", "weather_forecast.json"):
+        p = os.path.join(ROOT, "data", "raw", fn)
+        try:
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    store.set_raw(fn, f.read())
+        except Exception as e:  # noqa: BLE001
+            print("[serve] raw 入库跳过:", fn, e)
 
 
 def _save_snapshot(fetched_at=None, note=""):
