@@ -474,7 +474,7 @@ def ops(ctx, q, detail):
         age = round((now - fdt).total_seconds() / 60)
     except Exception:  # noqa: BLE001
         pass
-    if any(k in q for k in ["刷新", "更新", "多久", "过期", "数据年龄", "stale", "及时", "实时性"]):
+    if any(k in q for k in ["刷新", "更新", "多久", "过期", "数据年龄", "stale", "及时", "实时性", "新鲜"]):
         stale = (age is not None and age > 60)
         text = (f"数据抓取时间 {fetched}（约 {age} 分钟前）；刷新状态 {rs.get('status', 'unknown')}"
                 f"（上次成功 {rs.get('last_success') or '—'}）。计划每 3 小时刷新，另有每日 06:00 与外部定时器。")

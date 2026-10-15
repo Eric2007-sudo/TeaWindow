@@ -128,7 +128,7 @@ STRONG = [
     ("发芽", "harvest_date"), ("抽芽", "harvest_date"), ("出芽", "harvest_date"), ("早发", "harvest_date"), ("开摘", "harvest_date"),
     ("先采", "schedule"), ("采哪", "schedule"), ("排班", "schedule"), ("安排采", "schedule"),
     ("抢采", "decision"),
-    ("气象台", "data_source"),
+    ("气象台", "data_source"), ("新鲜", "ops"),
     # 最大雨日 / 对比（优先于逐日清单）
     ("雨最大", "rain_max"), ("最大雨", "rain_max"), ("哪天雨", "rain_max"), ("降雨最大", "rain_max"),
     ("哪个风险", "compare"), ("哪个更高", "compare"), ("哪个高", "compare"), ("风险更高", "compare"),
@@ -735,6 +735,9 @@ def _answer_impl(question, context=None, history=None, state=None):
     strongs = _strong_all(stripped) or _strong_all(qt_s)
     strong = strongs[0] if strongs else None
     kw = _keyword_intent(qt_s)
+    _daily = any(k in question for k in ["每天", "每日", "逐日", "逐天"])   # 逐日清单优先，避免被拆成复合
+    if _daily:
+        intent, conf = "forecast_list", 0.9
     # 纯相对日期追问（如"大后天呢"）无强/关词时，强制按日回答
     if _off_q is not None and not strong and not kw:
         intent, conf = "risk_today", 0.9
@@ -773,7 +776,7 @@ def _answer_impl(question, context=None, history=None, state=None):
         tasks = [t for t in tasks if t[1] != "rain"]
     if "ops" in _its:
         tasks = [t for t in tasks if t[1] != "data_source"]
-    if not is_follow and (len(tasks) >= 3 or (len(tasks) >= 2 and has_sep)):
+    if not is_follow and not _daily and (len(tasks) >= 3 or (len(tasks) >= 2 and has_sep)):
         try:
             from . import nlg as _nlg
         except Exception:  # noqa: BLE001
@@ -797,6 +800,8 @@ def _answer_impl(question, context=None, history=None, state=None):
         intent, conf = strong, 0.9            # 强关键词：置信度稳定（避免前后不一致）
     elif conf < 0.8 and kw:
         intent, conf = kw, 0.85               # 关键词命中：稳定
+    if _daily:                                # 逐日清单优先于任何单一强意图
+        intent, conf = "forecast_list", 0.9
     # 检索增强（RAG 思路）：低置信/疑似域外时用近邻意图做回退或澄清
     retr = None
     _fmt_state = isinstance(state, dict) and state.get("format") in ("json", "table")
