@@ -28,7 +28,8 @@ _LOCK = threading.Lock()
 _conn = None
 
 SENSOR_FIELDS = ("temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
-_UPSERT_PK = {"devices": "device_id", "forecast_days": "version_id,date", "refresh_state": "k", "alerts_state": "k"}
+_UPSERT_PK = {"devices": "device_id", "forecast_days": "version_id,date", "refresh_state": "k",
+              "alerts_state": "k", "data_json": "k", "raw_cache": "k", "nonces": "nonce"}
 
 
 def _tr(sql):
@@ -72,7 +73,15 @@ class _PgConn:
 
     def execute(self, sql, params=()):
         cur = self._raw.cursor()
-        cur.execute(_tr(sql), params)
+        try:
+            cur.execute(_tr(sql), params)
+        except Exception:
+            # 单语句失败必须回滚，避免污染整个事务（否则后续查询全部报错）
+            try:
+                self._raw.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            raise
         return _Cur(cur)
 
     def commit(self):

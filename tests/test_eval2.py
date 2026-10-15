@@ -641,6 +641,10 @@ def test_store_postgres_sql_translation(monkeypatch):
     assert "%s" in s1 and "ON CONFLICT DO NOTHING" in s1
     s2 = store._tr("INSERT OR REPLACE INTO refresh_state(k,ts,status) VALUES(?,?,?)")
     assert "ON CONFLICT (k)" in s2 and "EXCLUDED.status" in s2
+    # 主键 upsert 必须登记，否则退化为普通 INSERT → 主键冲突 → 事务被污染（曾导致 /api/ready 500）
+    for t in ("data_json", "raw_cache"):
+        s = store._tr(f"INSERT OR REPLACE INTO {t}(k,ts,blob) VALUES(?,?,?)")
+        assert f"ON CONFLICT (k)" in s and "EXCLUDED.blob" in s, t
 
 
 # ---------------- 第六/七轮：意图稳定 / 状态合并 / 运行问答 / 格式 / 英文 ----------------
