@@ -67,6 +67,10 @@ CN = [
            "1/3/7 天 MAE 0.49/0.67/0.91℃；POD 0.709 / FAR 0 / CSI 0.709",
            "事件回测 7/7；下一步：冻结版本 + 地块级传感器 + 正/负田间记录",
            "90 天真实场景验证计划；决策辅助，不替代官方预警"]},
+    {"t": "如何运行与合规", "b": ["在线：https://teawindow.onrender.com/ ；静态：https://eric2007-sudo.github.io/TeaWindow/",
+                     "本地：uvicorn src.serve:app ；离线单页：web/index.html 双击即开",
+                     "数据：Open-Meteo ERA5 历史 + MET Norway 预报（双源）· NASA GIBS NDVI · Sentinel-2 · DEM",
+                     "许可：代码 MIT · 数据/文档 CC BY 4.0；决策辅助，不替代官方预警"]},
     {"t": "ONE PLACE · ONE CLIMATE PROBLEM · ONE AI SOLUTION",
      "sub": "梅坞采候 TeaWindow ｜ 让 AI 走进真实茶园",
      "b": ["在线 https://teawindow.onrender.com/",
@@ -111,6 +115,10 @@ EN = [
            "1/3/7-day MAE 0.49/0.67/0.91C; POD 0.709 / FAR 0 / CSI 0.709",
            "Event backtest 7/7; next: frozen versions + plot sensors + positive/negative field reports",
            "90-day field pilot; decision support only"]},
+    {"t": "Run & compliance", "b": ["Live: https://teawindow.onrender.com/ ; Static: https://eric2007-sudo.github.io/TeaWindow/",
+                                "Local: uvicorn src.serve:app ; Offline single-page: web/index.html",
+                                "Data: Open-Meteo ERA5 history + MET Norway forecast (dual-source), NASA GIBS NDVI, Sentinel-2, DEM",
+                                "License: code MIT, data/docs CC BY 4.0; decision support only"]},
     {"t": "ONE PLACE - ONE CLIMATE PROBLEM - ONE AI SOLUTION",
      "sub": "TeaWindow - bringing AI to real tea gardens",
      "b": ["Live https://teawindow.onrender.com/",
@@ -119,13 +127,44 @@ EN = [
 ]
 
 
-def build(slides, font, out_name):
+NOTES_CN = [
+    "开场：一杯西湖龙井取决于短短几天的采摘窗口，而气候正在打乱它。我们做的是让信号变成地块级行动。",
+    "证据来自公开报道与官方统计：2010 冻害 17 亿、西湖区近 3 成受冻；2020/2022 约 5000 亩灼伤；2024 杭州高温 60 天。强调“问题真实、可核验”。",
+    "用户每天只问三件事：今天有风险吗、是什么风险、该采还是该防。痛点是信号分散，难落到地块。边界：决策辅助、以官方预警为准。",
+    "讲清数据双源（Open-Meteo 历史 + MET Norway 预报，限流自动回退）、指标引擎、GBDT 复合风险、透明规则与白话建议；强调“LLM 只润色、规则兜底”。",
+    "讲清为什么单阈值不够：霜冻×高温×干旱×物候交互。给出留出年 AUC 0.998/F1 0.85 vs 单阈值 0.78/0.50，并明确这是弱标签复现、不等于田间精度。",
+    "从预测走到决策：采摘排班 + 期望效用（抢采/等待/防护）+ 价值闭环与天气指数保险 + 地块级霜冻易感。",
+    "现场演示：打开在线 Demo，点顶部“智能问答”提问，展示多维复合提问分项作答、JSON/表格跨轮一致；再点“扫码分享”看二维码。",
+    "验证：春霜 357 天 MAE 1.32℃(CI 1.21–1.43) vs 持续法 2.08℃；POD 0.709/FAR 0/CSI 0.709；事件回测 7/7。下一步冻结版本+地块级传感器+正负田间记录。",
+    "运行与合规：在线/静态双形态；本地 uvicorn 或离线单页双击即开；数据全部公开免密钥；代码 MIT、数据文档 CC BY 4.0。",
+    "收尾：One Place · One Climate Problem · One AI Solution。给出在线/静态/仓库三个地址。",
+]
+NOTES_EN = [
+    "Hook: a good cup of West Lake Longjing depends on a few days of harvest window, and climate is disrupting it.",
+    "Evidence is public and citable: 2010 losses ~RMB 1.7bn; 2020/2022 ~5,000 mu heat damage; 2024 Hangzhou 60 high-temp days.",
+    "Three daily questions: risk today? which risk? harvest or protect? Signals are scattered; decision support only.",
+    "Dual-source weather (Open-Meteo history + MET Norway forecast with fallback), indicator engine, GBDT compound risk, transparent rules; LLM is optional rephrasing with rule fallback.",
+    "One threshold cannot capture frost x heat x drought x stage interactions. Held-out AUC 0.998/F1 0.85 vs 0.78/0.50; explicitly weak-label, not field accuracy.",
+    "From prediction to decisions: scheduling + expected utility (pick/wait/protect) + value/insurance + plot-level frost susceptibility.",
+    "Live demo: open the site, click In-house QA, ask a multi-part question, then show the QR share page.",
+    "Validation: 357-day spring frost MAE 1.32C vs 2.08C persistence; POD 0.709/FAR 0/CSI 0.709; 7/7 backtest. Next: frozen versions + plot sensors + field reports.",
+    "Run & compliance: live/static forms; local uvicorn or offline single page; all data public and key-free; code MIT, data/docs CC BY 4.0.",
+    "Close with the tagline and the three links (live/static/repo).",
+]
+
+
+def build(slides, font, out_name, notes=None):
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     blank = prs.slide_layouts[6]
-    for s in slides:
+    for si, s in enumerate(slides):
         sl = prs.slides.add_slide(blank)
+        if notes and si < len(notes):
+            try:
+                sl.notes_slide.notes_text_frame.text = notes[si]
+            except Exception:  # noqa: BLE001
+                pass
         bg = sl.shapes.add_shape(1, 0, 0, prs.slide_width, prs.slide_height)
         bg.fill.solid(); bg.fill.fore_color.rgb = DARK; bg.line.fill.background()
         # 顶栏
@@ -173,5 +212,5 @@ def build(slides, font, out_name):
 
 
 if __name__ == "__main__":
-    build(CN, CN_FONT, "TeaWindow_路演.pptx")
-    build(EN, EN_FONT, "TeaWindow_Pitch_EN.pptx")
+    build(CN, CN_FONT, "TeaWindow_路演.pptx", NOTES_CN)
+    build(EN, EN_FONT, "TeaWindow_Pitch_EN.pptx", NOTES_EN)
