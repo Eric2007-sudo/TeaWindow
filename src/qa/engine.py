@@ -805,7 +805,8 @@ def _answer_impl(question, context=None, history=None, state=None):
     # 检索增强（RAG 思路）：低置信/疑似域外时用近邻意图做回退或澄清
     retr = None
     _fmt_state = isinstance(state, dict) and state.get("format") in ("json", "table")
-    if not strong and not kw and not _fmt_state:   # 结构化格式将由渲染器处理，跳过检索回退（省时延）
+    # 仅在"无强/关词且分类器低置信"时才走检索回退（省时延；高置信直接作答）
+    if not strong and not kw and conf < 0.5 and not _fmt_state:
         retr = _retrieval_nearest(qt)
         top = retr[0] if retr else None
         in_scope = bool(top and top["intent"] not in ("oos", "greet") and top["sim"] >= RETR_ADOPT)
@@ -826,6 +827,10 @@ def _answer_impl(question, context=None, history=None, state=None):
                     return _reply(f"我不太确定你的问题。你更想问的是：{cand}？"
                                   "也可以直接问：今天有风险吗 / 要不要防冻 / 先采哪块地 / 保险多少钱一亩。")
                 return _reply("我不太确定你的问题。可以这样问：今天有风险吗 / 要不要防冻 / 先采哪块地 / 保险多少钱 / 今年什么时候开采。")
+    if intent == "oos":   # 高置信被判域外（或未走检索回退）→ 明确拒识，避免落到兜底
+        return _reply("这个问题超出我的能力范围：我只服务梅家坞茶园的气候风险与采摘/养护决策"
+                      "（风险、防冻、灌溉、采摘窗口、保险、开采期等）。其他问题请咨询相应专业人员。",
+                      intent="oos", chain=["拒识: 域外(K+1 分类)"])
     sl = _slots(qt, data)
     try:
         from . import nlg
