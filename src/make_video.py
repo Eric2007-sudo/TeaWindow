@@ -14,9 +14,9 @@ import imageio.v2 as imageio
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
-OUT = os.path.join(ROOT, "submit", "演示视频_自动生成.mp4")
+OUT = os.path.join(ROOT, "submit", "演示视频_自动播放.mp4")
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-N_SLIDES = 13
+N_SLIDES = 14
 SECS_PER_SLIDE = 4
 FPS = 1
 
@@ -24,7 +24,7 @@ FPS = 1
 def main():
     tmp = tempfile.mkdtemp(prefix="tw_vid_")
     try:
-        for name in ("demo.html", "data.js", "chart.umd.min.js"):
+        for name in ("demo.html", "demo.js", "data.js", "chart.umd.min.js"):
             p = os.path.join(WEB, name)
             if os.path.exists(p):
                 shutil.copy(p, tmp)

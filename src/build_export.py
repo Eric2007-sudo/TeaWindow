@@ -146,7 +146,7 @@ def main():
             "fetched_at": _season.now().strftime("%Y-%m-%d %H:%M:%S"),
             "season": _season.policy()["season"],
             "sources": [
-                "Open-Meteo ERA5 历史 + 预报（气象）",
+                "Open-Meteo ERA5 历史 + MET Norway 预报（气象，双源）",
                 "NASA GIBS MODIS_Terra_NDVI_8Day（遥感，颜色近似反演）",
                 "Element84 Earth Search Sentinel-2 L2A（场景清单）",
             ],
