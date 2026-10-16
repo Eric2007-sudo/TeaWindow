@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeaWindow 问答审阅（管理员）</title>
+<style>
+  :root{--bg:#0b1219;--panel:#16212b;--fg:#e8eef3;--muted:#8aa0b2;--line:#243444;--accent:#4aa8ff;--ok:#3fb950;--bad:#e5534b}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 18px 60px}
+  h1{font-size:20px;margin:0 0 4px} h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  input,button{font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:#0f1a24;color:var(--fg)}
+  button{cursor:pointer} button.p{background:#12324a;border-color:#1d4a6b}
+  .row{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .q{font-weight:600} .meta{color:var(--muted);font-size:12px;margin:4px 0}
+  .a{color:#cfe0ee;font-size:13px;white-space:pre-wrap}
+  .act{display:flex;gap:8px;margin-top:8px}
+  .ok{color:var(--ok)} .bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>梅坞采候 <span>TeaWindow</span> · 问答审阅（管理员）</h1>
+  <div class="sub">匿名问答（不含 IP/身份）。标记"相关/不相关"与教师参考，形成"使用→纠偏→回训"闭环。</div>
+  <div class="bar">
+    <input id="tok" type="password" placeholder="X-Admin-Token" style="min-width:260px">
+    <button class="p" id="load">加载</button>
+    <span id="cnt" class="meta"></span>
+    <span class="meta">仅管理员可见；数据为匿名记录。</span>
+  </div>
+  <div id="list"></div>
+</div>
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var tok = function () { return $("#tok").value.trim(); };
+  try { var t = localStorage.getItem("tw_admin_tok"); if (t) $("#tok").value = t; } catch (e) {}
+  $("#tok").addEventListener("change", function () { try { localStorage.setItem("tw_admin_tok", tok()); } catch (e) {} });
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
+
+  async function load() {
+    try { localStorage.setItem("tw_admin_tok", tok()); } catch (e) {}
+    var r = await fetch("api/qa/logs?limit=200", { headers: { "X-Admin-Token": tok() }, cache: "no-store" });
+    if (r.status === 403) { $("#list").innerHTML = '<div class="row bad">令牌无效或未配置 ADMIN_TOKEN。</div>'; return; }
+    var d = await r.json();
+    $("#cnt").textContent = "共 " + d.count + " 条 · 待审 " + d.pending.length;
+    $("#list").innerHTML = d.pending.map(function (x) {
+      return '<div class="row"><div class="q">' + esc(x.question) + '</div>'
+        + '<div class="meta">#' + x.id + " · " + esc(x.ts) + " · 意图 " + esc(x.intent) + " · 引擎 " + esc(x.engine) + '</div>'
+        + '<div class="a">' + esc(x.answer) + '</div>'
+        + '<div class="act"><button class="p" data-id="' + x.id + '" data-rel="1">相关·收藏</button>'
+        + '<button data-id="' + x.id + '" data-rel="0">不相关</button>'
+        + '<button data-id="' + x.id + '" data-rel="1" data-done="1">已审阅</button></div></div>';
+    }).join("") || '<div class="row">暂无待审记录。多问几句就会有。</div>';
+    $("#list").querySelectorAll("button").forEach(function (b) {
+      b.onclick = async function () {
+        var body = { id: +b.dataset.id, relevant: +b.dataset.rel, reviewed: b.dataset.done ? 1 : 0 };
+        await fetch("api/qa/review", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": tok() }, body: JSON.stringify(body) });
+        b.closest(".row").style.opacity = .45; b.textContent = "已处理 ✓";
+      };
+    });
+  }
+  $("#load").onclick = load;
+  if ($("#tok").value) load();
+})();
+</script>
+</body>
+</html>

@@ -86,11 +86,15 @@ def main():
     a = ap.parse_args()
 
     if a.use_api:
-        env = io.open(os.path.join(ROOT, ".env"), encoding="utf-8", errors="ignore").read()
-        tok = re.search(r"ADMIN_TOKEN\s*=\s*(\S+)", env)
+        tokv = os.environ.get("ADMIN_TOKEN", "")
+        envp = os.path.join(ROOT, ".env")
+        if not tokv and os.path.exists(envp):
+            env = io.open(envp, encoding="utf-8", errors="ignore").read()
+            m = re.search(r"ADMIN_TOKEN\s*=\s*(\S+)", env)
+            tokv = m.group(1) if m else ""
         import urllib.request
         url = os.environ.get("TW_URL", "https://teawindow.onrender.com") + f"/api/qa/logs?limit={a.limit}"
-        r = urllib.request.Request(url, headers={"X-Admin-Token": (tok.group(1) if tok else "")})
+        r = urllib.request.Request(url, headers={"X-Admin-Token": tokv})
         data = json.loads(urllib.request.urlopen(r, timeout=60).read())
         logs = data.get("pending", [])
     else:

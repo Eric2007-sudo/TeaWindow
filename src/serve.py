@@ -755,6 +755,23 @@ def qa_logs(request: Request, limit: int = 100):
     return {"count": store.qa_log_count(), "pending": store.qa_log_pending(limit)}
 
 
+class QAReviewReq(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: int
+    relevant: int | None = None
+    teacher: str | None = None
+    reviewed: int = 1
+
+
+@app.post("/api/qa/review")
+def qa_review(request: Request, req: QAReviewReq):
+    """管理员：标记某条匿名问答（相关性/教师参考/是否已审阅）。"""
+    _require_admin(request)
+    store.qa_log_set(req.id, teacher=req.teacher, teacher_model="admin",
+                     relevant=req.relevant, reviewed=req.reviewed)
+    return {"ok": True, "id": req.id, "count": store.qa_log_count()}
+
+
 @app.get("/api/ask", response_model=AskResp)
 def ask_get(request: Request, q: str, engine: str = "own"):
     if engine not in ("own", "llm"):

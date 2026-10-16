@@ -1,0 +1,32 @@
+name: QA harvest (weekly)
+
+# 每周围绕匿名问答日志：项目相关筛选 + DeepSeek 教师纠偏 → 产出纠偏清单与回训意图数据。
+# 产物作为 artifact 上传（审阅后由人合并进训练集，避免直接抄袭教师文本）。
+on:
+  schedule:
+    - cron: "30 2 * * 1"   # 每周一 02:30 UTC
+  workflow_dispatch:
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Run harvest against live service
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          python src/qa/harvest.py --use-api --limit 100 || true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-harvest
+          path: |
+            data/qa/harvest_intents.jsonl
+            report/qa_review.md
+          if-no-files-found: ignore
