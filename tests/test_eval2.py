@@ -768,6 +768,37 @@ def test_memory_first_and_nth_question():
     assert "明天要不要防冻" in e.answer("第2个问题问的是啥", None, h)["text"]
 
 
+def test_memory_ordinals():
+    import qa.engine as e
+    h = [{"role": "user", "content": "你好"}, {"role": "assistant", "content": "x"},
+         {"role": "user", "content": "今天有风险吗"}, {"role": "assistant", "content": "y"},
+         {"role": "user", "content": "要不要防冻"}, {"role": "assistant", "content": "z"}]
+    assert "要不要防冻" in e.answer("刚刚我问了什么", None, h)["text"]          # 上一问
+    assert "今天有风险吗" in e.answer("再上一条呢", None, h)["text"]            # 倒数第二问
+    assert "你好" in e.answer("我刚刚第一句问了什么", None, h)["text"]          # 第一句
+    assert "今天有风险吗" in e.answer("倒数第2个问题问的是什么", None, h)["text"]  # 倒数第二
+    assert e.answer("再上一条呢", None, [])["intent"] == "memory"             # 无历史也要明确答复
+
+
+def test_qa_logging_and_isolation(monkeypatch):
+    import store, serve
+    # 匿名日志：写入/读取/标记
+    store.qa_log_add("anonA", "今天有风险吗", "risk_today", "答案A", "own")
+    pend = store.qa_log_pending(50)
+    assert any(x["question"] == "今天有风险吗" for x in pend)
+    assert store.qa_log_count() >= 1
+    # 会话隔离：服务端无状态，history 由客户端携带 → 无历史时不包含他人内容
+    import qa.engine as e
+    r = e.answer("今天有风险吗", None, [], None)
+    assert "答案A" not in r["text"]
+    # 管理员接口
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    assert c.get("/api/qa/logs").status_code == 403
+    ok = c.get("/api/qa/logs?limit=5", headers={"X-Admin-Token": "adm"})
+    assert ok.status_code == 200 and "pending" in ok.json()
+
+
 def test_lineage_question_routes_to_ops():
     import qa.engine as e
     r = e.answer("当前数据版本的上游 URL、参数、完整 SHA-256 和版本号")

@@ -621,8 +621,30 @@ def _answer_impl(question, context=None, history=None, state=None):
         tail = "…" if len(prev_assistant) > 140 else ""
         return _reply("我上一条回答是：「" + prev_assistant[:140] + tail + "」。", intent="memory",
                       chain=["会话记忆: 上一轮回答"])
-    # 会话记忆泛化：最早/第一句、第 N 个问题
+    # 序数记忆：倒数第 N / 再上一条（倒数第二）/ 上一条（问，排除"上一条回答"）
     _users = [m.get("content", "") for m in (history or []) if m.get("role") == "user"]
+    if _users:
+        _mo = re.search(r"倒数第\s*([一二三四五六七八九十\d]+)", question)
+        if _mo:
+            try:
+                from . import nlg as _nc
+                _t = _mo.group(1)
+                _n = int(_t) if _t.isdigit() else _nc._cn2num(_t)
+            except Exception:  # noqa: BLE001
+                _n = int(_mo.group(1)) if _mo.group(1).isdigit() else None
+            if _n and _n <= len(_users):
+                return _reply(f"倒数第 {_n} 个问题问的是：「{_users[-_n]}」。", intent="memory",
+                              chain=[f"会话记忆: 倒数第{_n}问"])
+        if re.search(r"(再上|上上|更早|往前)", question) and re.search(r"(条|个|问|句)", question):
+            if len(_users) >= 2:
+                return _reply(f"再上一条你问的是：「{_users[-2]}」。", intent="memory", chain=["会话记忆: 倒数第二问"])
+            return _reply("前面没有更早的问题了（这是对话里的第一条）。", intent="memory")
+        if "上一条" in question and not any(k in question for k in ["回答", "你刚说", "你说了"]):
+            return _reply(f"你上一条问的是：「{_users[-1]}」。", intent="memory", chain=["会话记忆: 上一轮用户问题"])
+    elif re.search(r"(再上|上上|更早|往前|倒数第)", question) or \
+            ("上一条" in question and not any(k in question for k in ["回答", "你刚说", "你说了"])):
+        return _reply("前面没有更早的问题了（这是对话开始）。", intent="memory", chain=["会话记忆: 无更早问题"])
+    # 会话记忆泛化：最早/第一句、第 N 个问题
     if _users and any(k in question for k in ["第一句", "第一个问题", "头一句", "最初的问题",
                                               "最开始问", "最早问", "最早的问题", "开头问"]):
         return _reply(f"你最早问的是：「{_users[0]}」。", intent="memory", chain=["会话记忆: 最早问题"])

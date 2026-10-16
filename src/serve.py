@@ -714,6 +714,25 @@ def _ask(q, engine, history=None, state=None):
     return base
 
 
+def _log_qa(request, req, out):
+    """匿名记录一条问答（不含 IP/身份，按天加盐哈希）；用于教师纠偏与回训。"""
+    try:
+        if os.environ.get("QA_LOG", "1") != "1":
+            return
+        q = (req.question or "").strip()
+        if len(q) < 2 or len(q) > 500:
+            return
+        import hashlib
+        ip = request.client.host if request.client else "?"
+        salt = datetime.date.today().isoformat()
+        anon = hashlib.sha256((salt + "|" + ip).encode()).hexdigest()[:12]
+        threading.Thread(target=store.qa_log_add,
+                         args=(anon, q, out.get("intent"), out.get("text"), req.engine),
+                         daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @app.post("/api/ask", response_model=AskResp,
           responses={422: {"model": ErrorResp}, 429: {"model": ErrorResp}})
 def ask(request: Request, req: AskReq):
@@ -724,7 +743,16 @@ def ask(request: Request, req: AskReq):
         _rate_limit("llm:" + ip, limit=int(os.environ.get("LLM_RPM", "8")))
     _rate_limit(ip, limit=int(os.environ.get("ASK_RPM", "40")))
     hist = [{"role": m.role, "content": m.content[:500]} for m in req.history[-10:]]   # 记忆窗口≈10 条
-    return _ask(req.question.strip(), req.engine, hist, req.state)
+    out = _ask(req.question.strip(), req.engine, hist, req.state)
+    _log_qa(request, req, out)
+    return out
+
+
+@app.get("/api/qa/logs")
+def qa_logs(request: Request, limit: int = 100):
+    """管理员：查看待纠偏的匿名问答（不含 IP/身份）。"""
+    _require_admin(request)
+    return {"count": store.qa_log_count(), "pending": store.qa_log_pending(limit)}
 
 
 @app.get("/api/ask", response_model=AskResp)
