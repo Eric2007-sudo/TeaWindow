@@ -1413,6 +1413,16 @@ async def alerts_echo(request: Request):
             "server_time": season.now().isoformat(timespec="seconds")}
 
 
+@app.get("/api/terrain")
+def terrain_api():
+    """地块级地形风险图数据（网格 + 高风险清单；由 src/terrain_map.py 生成）。"""
+    p = os.path.join(WEB, "terrain_grid.json")
+    if not os.path.exists(p):
+        raise HTTPException(404, "terrain map not generated; run python src/terrain_map.py")
+    with open(p, encoding="utf-8") as f:
+        return JSONResponse(json.load(f))
+
+
 @app.get("/api/forecast/compare")
 def forecast_compare(request: Request):
     """change-warning：本地快照 vs 上游最新逐日预报的差异（缓存 30 分钟）。"""

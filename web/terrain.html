@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeaWindow · 地块级地形风险图（梅家坞）</title>
+<style>
+  :root{--bg:#0b1219;--panel:#16212b;--fg:#e8eef3;--muted:#8aa0b2;--line:#243444;--accent:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:22px 18px 60px}
+  h1{font-size:22px;margin:0 0 4px} h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  button{font:inherit;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:#0f1a24;color:var(--fg);cursor:pointer}
+  button.on{background:#12324a;border-color:#1d4a6b;color:#cfe0ee}
+  .grid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .map{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#000}
+  .map img{display:block;width:100%;position:absolute;inset:0}
+  .map .ph{position:relative;width:100%}
+  #tip{position:absolute;pointer-events:none;background:rgba(11,18,25,.92);border:1px solid var(--line);
+       border-radius:8px;padding:6px 9px;font-size:12.5px;line-height:1.5;color:#dfe9f2;transform:translate(8px,-8px);display:none;z-index:5}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .lg{display:flex;gap:10px;align-items:center;font-size:12.5px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+  .sw{width:18px;height:10px;border-radius:3px;display:inline-block}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 6px;border-bottom:1px solid var(--line)}
+  .hi{color:#e5534b} .mid{color:#d6b657} .lo{color:#3fb950}
+  a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>梅坞采候 <span>TeaWindow</span> · 地块级地形风险图</h1>
+  <div class="sub" id="sub">梅家坞茶园 AOI · DEM 山体阴影 + 地块级霜冻/高温易感叠加（相对差异，非地块实勘）</div>
+
+  <div class="bar">
+    <button id="bFrost" class="on">霜冻易感</button>
+    <button id="bHeat">高温/旱易感</button>
+    <button id="bHill">仅地形</button>
+    <span class="lg"><span class="sw" style="background:#3fb950"></span>低
+      <span class="sw" style="background:#d6b657"></span>中
+      <span class="sw" style="background:#e5534b"></span>高/极高</span>
+    <span style="flex:1"></span>
+    <a href="index.html">← 返回仪表盘</a>
+  </div>
+
+  <div class="grid">
+    <div class="map" id="map">
+      <img class="ph" src="terrain_hillshade.png" alt="地形底图">
+      <img id="lyr" src="terrain_frost.png" alt="风险叠加" style="opacity:.75">
+      <div id="tip"></div>
+    </div>
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">地块级高风险（霜冻）</div>
+      <table id="top"><thead><tr><th>位置(经纬)</th><th>海拔</th><th>等级</th></tr></thead><tbody></tbody></table>
+      <div class="lg" id="base"></div>
+      <div style="color:var(--muted);font-size:12.5px;margin-top:10px" id="method"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var G = null;
+  var lyr = $("#lyr"), tip = $("#tip"), map = $("#map");
+  function setLayer(src, op) { lyr.src = src; lyr.style.opacity = op; }
+  $("#bFrost").onclick = function () { setLayer("terrain_frost.png", .75); this.classList.add("on"); $("#bHeat").classList.remove("on"); $("#bHill").classList.remove("on"); };
+  $("#bHeat").onclick = function () { setLayer("terrain_heat.png", .75); this.classList.add("on"); $("#bFrost").classList.remove("on"); $("#bHill").classList.remove("on"); };
+  $("#bHill").onclick = function () { lyr.style.opacity = 0; this.classList.add("on"); $("#bFrost").classList.remove("on"); $("#bHeat").classList.remove("on"); };
+
+  function nearest(lon, lat) {
+    var best = null, bd = 1e9;
+    for (var i = 0; i < G.cells.length; i++) {
+      var c = G.cells[i], d = (c.lon - lon) * (c.lon - lon) + (c.lat - lat) * (c.lat - lat);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+  function riskCls(v) { return v >= 0.75 ? "极高" : v >= 0.6 ? "高" : v >= 0.4 ? "中" : "低"; }
+  function clsSpan(c) { return c === "高" || c === "极高" ? "hi" : c === "中" ? "mid" : "lo"; }
+
+  function hover(e) {
+    if (!G) return;
+    var r = map.getBoundingClientRect();
+    var fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+    if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { tip.style.display = "none"; return; }
+    var lon = G.bbox[0] + fx * (G.bbox[2] - G.bbox[0]);
+    var lat = G.bbox[3] - fy * (G.bbox[3] - G.bbox[1]);
+    var c = nearest(lon, lat);
+    tip.style.display = "block";
+    tip.style.left = (e.clientX - r.left) + "px";
+    tip.style.top = (e.clientY - r.top) + "px";
+    tip.innerHTML = "海拔 " + c.elev + " m · 坡度 " + c.slope + "° · 坡向 " + c.aspect + "°<br>" +
+      "霜冻易感 <b>" + c.frost_risk + "</b>（" + c.frost + "） · 高温/旱 <b>" + c.heat_risk + "</b>（" + c.heat + "）";
+  }
+  map.addEventListener("mousemove", hover);
+  map.addEventListener("mouseleave", function () { tip.style.display = "none"; });
+
+  fetch("terrain_grid.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (g) {
+    G = g;
+    $("#method").textContent = g.method + "（分辨率≈" + g.res_m + " m/px）";
+    var tb = $("#top").querySelector("tbody");
+    (g.top_frost || []).forEach(function (c) {
+      tb.innerHTML += "<tr><td>" + c.lon + ", " + c.lat + "</td><td>" + c.elev + " m</td>" +
+        "<td class='" + clsSpan(c.frost_risk) + "'>" + c.frost_risk + "</td></tr>";
+    });
+  }).catch(function () { $("#method").textContent = "地形数据未生成：请运行 python src/terrain_map.py"; });
+
+  fetch("api/overview", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+    var cur = d && d.days ? d.days.filter(function (x) { return x.source === "forecast"; })[0] : null;
+    if (cur) {
+      $("#base").innerHTML = "站点预报基准：" + cur.date + " 复合风险 R=" + cur.risk_R + "（" + cur.risk_level +
+        "）。本地图显示的是**地形相对差异**（同一天气下哪里更易霜冻/高温）。";
+    }
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>
