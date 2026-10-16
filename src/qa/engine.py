@@ -459,23 +459,26 @@ def _clause_tasks(q):
 _CANCEL = {"算了", "不问了", "不用了", "取消", "没事了", "不查了"}
 
 
-def _final_guard(q, txt):
-    """P0：输出业务校验——非春采期禁采摘措辞；指定日期须落到位；去占位。"""
+def _final_guard(q, txt, force_date=None):
+    """P0：输出业务校验——非春采期禁采摘措辞；指定/承接日期须落到位；去占位。"""
     txt = season.clean_text(txt)
     if season.is_off():
         for k in ["可正常采", "适合采", "建议采摘", "优先采", "先采"]:
             if k in txt:
                 txt = season.care_hint() + "（" + txt.replace(k, "暂不推荐采摘") + "）"
                 break
+    iso = None
     try:
         from . import nlg
         ad = nlg._parse_abs_date(q)
+        if ad is not None:
+            iso = ad.isoformat()
     except Exception:  # noqa: BLE001
         ad = None
-    if ad is not None:
-        iso = ad.isoformat()
-        if iso not in txt and "超出" not in txt and "不在" not in txt:
-            txt += f"（目标日期 {iso}）"
+    if iso is None and force_date:                 # 相对日期追问：承接到的目标日也要落到位
+        iso = str(force_date)[:10]
+    if iso and iso not in txt and "超出" not in txt and "不在" not in txt:
+        txt += f"（目标日期 {iso}）"
     return txt
 
 
@@ -567,7 +570,7 @@ def answer(question, context=None, history=None, state=None):
                 r["text"] = tbl
                 r["format"] = "table"
         if isinstance(r.get("text"), str) and r.get("format") not in ("json", "table") and r.get("intent") not in ("cancel", "memory"):
-            r["text"] = _final_guard(q, r["text"])
+            r["text"] = _final_guard(q, r["text"], (st.get("active_date") if isinstance(st, dict) else None))
         r["state"] = st
     except Exception:  # noqa: BLE001
         pass
