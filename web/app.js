@@ -56,7 +56,8 @@
   const fetched = (D.meta && (D.meta.fetched_at || D.meta.updated)) || "";
   let ageMin = null;
   if (fetched) { const t = new Date(String(fetched).replace(" ", "T")); if (!isNaN(t)) ageMin = Math.round((Date.now() - t) / 60000); }
-  if (ageMin != null && ageMin > 150) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据新鲜度</div><div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据约 ${ageMin} 分钟前获取（可能已过期）；请以最新预报与官方预警为准</div></div>`);
+  if (ageMin != null && ageMin > 90) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据新鲜度</div><div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据约 ${ageMin} 分钟前获取（可能已过期）；请以最新预报与官方预警为准</div></div>`);
+  else if (ageMin != null) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#3fb950"><div class="k">数据新鲜度</div><div class="v" style="font-size:15px;color:#3fb950">数据约 ${ageMin} 分钟前更新 · 服务每 10 分钟自动刷新（上游预报逐小时更新）</div></div>`);
   if (ageDays > 2) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#e5534b"><div class="k">数据时效</div><div class="v" style="font-size:15px;color:#e5534b">⚠️ 数据日 ${cur.date}（已 ${ageDays} 天），行动建议请谨慎，以实况与官方预警为准</div></div>`);
   if (offSeason) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#4aa8ff"><div class="k">季节提示</div><div class="v" style="font-size:15px;color:#cfe0ee">当前为非春采期（春采季 3–4 月）：采摘窗口/排班仅供参考，请以园间养护为主</div></div>`);
   document.getElementById("cards").innerHTML = notes.join("") + cards.map(c =>

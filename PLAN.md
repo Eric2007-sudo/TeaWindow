@@ -28,7 +28,7 @@ deploy/              # Dockerfile · Procfile · render.yaml
 - `GET /api/summary`　今日风险 / 未来 7 天最高风险 / 推荐窗口 / 模型指标
 - `GET /api/days?scope=recent|forecast`　图表与表格数据
 - `GET /api/advice?date=YYYY-MM-DD`　DeepSeek 建议（带内存缓存）
-- `POST /api/refresh`　触发管线刷新（`apscheduler` 每日 06:00 全量 + 每小时轻量）
+- `POST /api/refresh`　触发管线刷新（`apscheduler` 每日 06:00 全量 + 每 10 分钟轻量）
 
 ## 部署（两层）
 - **Tier1（保底）**：静态 `web/` → Cloudflare Pages / GitHub Pages。
@@ -41,7 +41,7 @@ deploy/              # Dockerfile · Procfile · render.yaml
 
 ## 已完成（第二轮）
 - [x] **#8 台站偏差订正**：`src/station_correct.py` → `daily_corrected.csv`、`report/station_correction.md`
-- [x] **A1 外部定时刷新**：`.github/workflows/refresh.yml`（**每小时**调 `/api/refresh`，轻量仅取预报并保活）
+- [x] **A1 外部定时刷新**：`.github/workflows/refresh.yml`（**每 10 分钟**调 `/api/refresh`，轻量仅取预报并保活）
 - [x] **A2 单元测试+CI**：`tests/` + `.github/workflows/test.yml`（本地 5 passed）
 - [x] **A3 许可+规范**：`LICENSE`(MIT)、`LICENSE-DATA.md`(CC BY 4.0)、`CITATION.cff`、仓库描述/话题
 - [x] **B4 自播放演示**：`web/demo.html`（自动巡览+字幕）

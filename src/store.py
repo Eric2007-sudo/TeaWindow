@@ -230,11 +230,13 @@ def save_snapshot(meta, days):
     """meta: {ts,source,model,gen_time,fetched_at,lat,lon,raw_sha256,build,note}; days: [{date,tmin,tmax,precip,p_frost,p_heat,risk_R,risk_level}]"""
     with _LOCK:
         c = _db()
-        # 内容去重：与上一条 (raw_sha256_full, fetched_at, model) 完全相同的快照不重复入库
+        # 内容去重：与上一条 raw_sha256_full 相同（同一上游批次）→ 不新增行，仅刷新时间戳/构建
         try:
-            prev = c.execute("SELECT id,raw_sha256_full,fetched_at,model FROM data_versions ORDER BY id DESC LIMIT 1").fetchone()
-            if prev and prev[1] and prev[1] == meta.get("raw_sha256_full") \
-                    and prev[2] == meta.get("fetched_at") and prev[3] == meta.get("model"):
+            prev = c.execute("SELECT id,raw_sha256_full FROM data_versions ORDER BY id DESC LIMIT 1").fetchone()
+            if prev and prev[1] and prev[1] == meta.get("raw_sha256_full"):
+                c.execute("UPDATE data_versions SET ts=?,fetched_at=?,build=?,note=? WHERE id=?",
+                          (meta.get("ts"), meta.get("fetched_at"), meta.get("build"), meta.get("note"), prev[0]))
+                c.commit()
                 return prev[0]
         except Exception:  # noqa: BLE001
             pass
