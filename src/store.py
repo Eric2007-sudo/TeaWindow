@@ -605,6 +605,7 @@ def pilot_evaluate(hazard_kinds=None, risk_threshold=0.5):
             "n_events": len(event_dates), "n_negatives": len(neg_dates),
             "unknown_days": len(set(pred_pos) - known),
             "n_snapshots": len(vers),
+            "outcomes": len(outcomes),
             "note": "仅用显式确认结果：受灾=正样本、巡查无灾=负样本；未上报日期不计入（unknown）。",
             "samples": samples[:50]}
 

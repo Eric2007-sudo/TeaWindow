@@ -1,10 +1,10 @@
-name: Daily refresh (external cron)
+name: Hourly refresh (external cron)
 
 # 解决 Render 免费层休眠导致内置 apscheduler 不触发的问题：
-# 由 GitHub Actions 每日定时调用线上 /api/refresh，并顺带保活。
+# 由 GitHub Actions 每小时调用线上 /api/refresh（轻量：仅预报），并顺带保活。
 on:
   schedule:
-    - cron: "20 */3 * * *"   # 每 3 小时（UTC），与内置刷新对齐
+    - cron: "20 * * * *"   # 每小时（UTC），与内置刷新对齐
   workflow_dispatch:
 
 jobs:

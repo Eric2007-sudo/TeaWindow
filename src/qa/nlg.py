@@ -475,9 +475,9 @@ def ops(ctx, q, detail):
     except Exception:  # noqa: BLE001
         pass
     if any(k in q for k in ["刷新", "更新", "多久", "过期", "数据年龄", "stale", "及时", "实时性", "新鲜"]):
-        stale = (age is not None and age > 60)
+        stale = (age is not None and age > int(__import__("os").environ.get("STALE_MINUTES", "90")))
         text = (f"数据抓取时间 {fetched}（约 {age} 分钟前）；刷新状态 {rs.get('status', 'unknown')}"
-                f"（上次成功 {rs.get('last_success') or '—'}）。计划每 3 小时刷新，另有每日 06:00 与外部定时器。")
+                f"（上次成功 {rs.get('last_success') or '—'}）。每小时刷新，另每日 06:00 全量刷新（外部定时器每 3 小时保活）。")
         text += " 当前数据可能已过期，请以最新预报与官方预警为准。" if stale else " 数据在新鲜窗口内。"
         text += f" 线上数据版本 v{v.get('id')}（构建 {v.get('build') or '—'}，上游 {v.get('upstream_url') or '—'}）。"
         return text, ["运行: refresh_state / data_versions", "口径: 数据抓取时间≠业务日"]
@@ -880,8 +880,10 @@ HANDLERS = {
 
 
 def _stale_age(data):
-    """返回数据年龄（分钟），若 >60 则视为陈旧；否则 None。"""
+    """返回数据年龄（分钟），若超过陈旧阈值（STALE_MINUTES，默认 90）则视为陈旧；否则 None。"""
     try:
+        import os
+        thr = int(os.environ.get("STALE_MINUTES", "90"))
         meta = (data or {}).get("meta", {}) or {}
         fetched = meta.get("fetched_at") or meta.get("updated")
         import datetime
@@ -890,7 +892,7 @@ def _stale_age(data):
         if fdt.tzinfo is None:
             now = now.replace(tzinfo=None)
         age = (now - fdt).total_seconds() / 60.0
-        return round(age) if age > 60 else None
+        return round(age) if age > thr else None
     except Exception:  # noqa: BLE001
         return None
 

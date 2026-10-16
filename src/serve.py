@@ -147,7 +147,7 @@ def _cur_day(days):
     return past[-1] if past else days[-1]
 
 
-STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "60"))
+STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "90"))
 _COMPARE = {"ts": 0.0, "result": None}
 
 
@@ -359,11 +359,11 @@ def _refresh(do_fetch=True, light=True):
         except Exception as e:  # noqa: BLE001
             print("[serve] 刷新后比对跳过:", e)
         store.set_refresh_state("ok", round(_time.time() - t0, 1),
-                                next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
+                                next_planned=(season.now() + datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"))
         return {"status": "ok"}
     except Exception as e:  # noqa: BLE001
         store.set_refresh_state("error", round(_time.time() - t0, 1), str(e),
-                                next_planned=(season.now() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"))
+                                next_planned=(season.now() + datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"))
         raise
     finally:
         sys.argv = _saved_argv
@@ -949,12 +949,12 @@ def refresh(request: Request, background: BackgroundTasks, fetch: bool = True, f
     return {"status": "scheduled", "fetch": fetch, "light": not full}
 
 
-# ---- 定时任务：每日 06:00 + 每 3 小时刷新（若有 apscheduler）----
+# ---- 定时任务：每日 06:00 全量 + 每小时轻量刷新（若有 apscheduler）----
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     _sched = BackgroundScheduler(timezone="Asia/Shanghai")
     _sched.add_job(lambda: _refresh(True, light=False), "cron", hour=6, minute=0, id="daily_refresh")
-    _sched.add_job(lambda: _refresh(True, light=True), "cron", hour="0,3,9,12,15,18,21", minute=20, id="refresh_3h",
+    _sched.add_job(lambda: _refresh(True, light=True), "cron", minute=20, id="refresh_hourly",
                    replace_existing=True)
     # 预测验证归档（每 6 小时）
     _sched.add_job(lambda: _run_verify(60), "cron", hour="1,7,13,19", minute=35, id="verify_6h",
