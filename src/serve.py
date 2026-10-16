@@ -406,9 +406,18 @@ def _ensure_raw():
     try:
         if not os.path.exists(ap):
             blob = store.get_raw("weather_archive.json")
+            base = os.path.join(ROOT, "data", "archive_baseline.json")
             if blob:
                 open(ap, "w", encoding="utf-8").write(blob)
                 print("[serve] 从数据库恢复 archive 缓存")
+            elif os.path.exists(base):   # 仓库完整基线归档（2015+），避免长历史分析退化
+                blob = open(base, encoding="utf-8").read()
+                open(ap, "w", encoding="utf-8").write(blob)
+                try:
+                    store.set_raw("weather_archive.json", blob)
+                except Exception:  # noqa: BLE001
+                    pass
+                print("[serve] 由仓库基线归档恢复 archive 缓存")
             else:
                 hist = [x for x in _load().get("days", []) if x.get("source") == "history"]
                 if hist:

@@ -183,31 +183,44 @@ def main():
                 print("[archive] 抓取失败，回退本地缓存:", e)
                 arc = json.load(open(ap_, encoding="utf-8"))
             else:
-                # 无本地缓存（如容器实例轮换）：改由上次构建产物中的历史回退重建，保证刷新不中断
+                # 优先使用仓库内完整基线归档（2015+，避免长历史分析退化）
+                _base = os.path.join(ROOT, "data", "archive_baseline.json")
                 _dj = os.path.join(ROOT, "web", "data.json")
-                _hist = None
-                if os.path.exists(_dj):
+                _ok = False
+                if os.path.exists(_base):
                     try:
-                        _dd = json.load(open(_dj, encoding="utf-8"))
-                        _hist = [x for x in _dd.get("days", []) if x.get("source") == "history"]
+                        arc = json.load(open(_base, encoding="utf-8"))
+                        print("[archive] 抓取失败，回退仓库完整基线归档:", e)
+                        with open(ap_, "w", encoding="utf-8") as f:
+                            json.dump(arc, f, ensure_ascii=False)
+                        _ok = True
                     except Exception:  # noqa: BLE001
-                        _hist = None
-                if not _hist:
-                    raise
-                print("[archive] 抓取失败且无缓存，由上次构建的历史回退重建:", e)
-                _map = {"temperature_2m_max": "tmax", "temperature_2m_min": "tmin", "temperature_2m_mean": "tmean",
-                        "precipitation_sum": "precip", "relative_humidity_2m_mean": "rh",
-                        "et0_fao_evapotranspiration": "et0", "sunshine_duration": "sun_s",
-                        "wind_speed_10m_max": "wind", "soil_moisture_0_to_7cm_mean": "soil",
-                        "shortwave_radiation_sum": None}
-                arc = {"daily": {"time": [x["date"] for x in _hist]}, "_fallback": "from-build"}
-                for k, src in _map.items():
-                    arc["daily"][k] = [x.get(src) if src else None for x in _hist]
-                try:
-                    with open(ap_, "w", encoding="utf-8") as f:
-                        json.dump(arc, f, ensure_ascii=False)
-                except Exception:  # noqa: BLE001
-                    pass
+                        _ok = False
+                if not _ok:
+                    # 否则由上次构建产物中的历史回退重建
+                    _hist = None
+                    if os.path.exists(_dj):
+                        try:
+                            _dd = json.load(open(_dj, encoding="utf-8"))
+                            _hist = [x for x in _dd.get("days", []) if x.get("source") == "history"]
+                        except Exception:  # noqa: BLE001
+                            _hist = None
+                    if not _hist:
+                        raise
+                    print("[archive] 抓取失败且无基线，由上次构建的历史回退重建:", e)
+                    _map = {"temperature_2m_max": "tmax", "temperature_2m_min": "tmin", "temperature_2m_mean": "tmean",
+                            "precipitation_sum": "precip", "relative_humidity_2m_mean": "rh",
+                            "et0_fao_evapotranspiration": "et0", "sunshine_duration": "sun_s",
+                            "wind_speed_10m_max": "wind", "soil_moisture_0_to_7cm_mean": "soil",
+                            "shortwave_radiation_sum": None}
+                    arc = {"daily": {"time": [x["date"] for x in _hist]}, "_fallback": "from-build"}
+                    for k, src in _map.items():
+                        arc["daily"][k] = [x.get(src) if src else None for x in _hist]
+                    try:
+                        with open(ap_, "w", encoding="utf-8") as f:
+                            json.dump(arc, f, ensure_ascii=False)
+                    except Exception:  # noqa: BLE001
+                        pass
 
     print("[forecast] 未来 16 天")
     fp = os.path.join(RAW, "weather_forecast.json")

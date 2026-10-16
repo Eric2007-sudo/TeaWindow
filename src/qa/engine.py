@@ -342,7 +342,11 @@ def compose(intent, q, sl, data):
         text = "采摘排班建议：" + "；".join(lines) + "（按每日产能与地块霜冻易感排序）。"
         return {"text": text, "chains": ["模型: 采摘调度优化"]}
     if intent == "insurance":
-        ins = data.get("insurance", {})
+        ins = data.get("insurance", {}) or {}
+        if ins.get("insufficient_history"):
+            return {"text": ("指数保险需要较长历史（≥5 年）才能定价；**当前历史样本不足（n=%s），暂不给出定价**。"
+                             "可用 /api/refresh 触发全量刷新以恢复完整历史归档。" % ins.get("n_years")),
+                    "chains": ["模型: 天气指数保险（样本不足，暂不定价）"]}
         text = (f"可参考天气指数保险：霜冻阈值 {ins.get('frost_threshold')} 度日、"
                 f"赔付 {ins.get('payout_frost')} 元/亩；历史赔付年 {ins.get('fire_years')}/{ins.get('n_years')}，"
                 f"精算公平保费≈{ins.get('fair_premium_per_mu')} 元/亩。不依赖人工查勘、按客观指数自动理赔。")

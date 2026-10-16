@@ -383,7 +383,11 @@ def plot(ctx, q, detail):
 
 
 def insurance(ctx, q, detail):
-    ins = ctx["data"].get("insurance", {})
+    ins = ctx["data"].get("insurance", {}) or {}
+    if ins.get("insufficient_history"):
+        return ("指数保险需要较长历史（≥5 年）才能定价；**当前历史样本不足（n=%s），暂不给出定价**。"
+                "可用 /api/refresh 触发全量刷新以恢复完整历史归档。" % ins.get("n_years"),
+                ["模型: 天气指数保险（样本不足，暂不定价）"])
     text = f"指数保险参考：霜冻阈值 {ins.get('frost_threshold')} 度日、赔付 {ins.get('payout_frost')} 元/亩；" + \
            f"历史赔付年 {ins.get('fire_years')}/{ins.get('n_years')}，公平保费≈{ins.get('fair_premium_per_mu')} 元/亩。"
     if detail:

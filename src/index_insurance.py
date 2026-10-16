@@ -32,6 +32,17 @@ def main():
         rows.append({"year": int(y), "frost_index": round(frost_idx, 1), "heat_index": heat_idx})
     idx = pd.DataFrame(rows).sort_values("year")
 
+    # 历史样本不足（如归档退化到近 180 天）时，不输出 0 假值，明确标注样本不足
+    if len(idx) < 5:
+        data = json.load(open(os.path.join(WEB, "data.json"), encoding="utf-8"))
+        data["insurance"] = {"insufficient_history": True, "n_years": len(idx),
+                             "note": "历史样本不足（<5 年），暂不给出指数保险定价；需先恢复完整历史归档。"}
+        blob = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        open(os.path.join(WEB, "data.json"), "w", encoding="utf-8").write(blob)
+        open(os.path.join(WEB, "data.js"), "w", encoding="utf-8").write("window.TW_DATA = " + blob + ";\n")
+        print("-> 历史样本不足（n_years=%d），已标注不给出定价" % len(idx))
+        return
+
     tf = float(np.percentile(idx["frost_index"], 60))
     th = float(np.percentile(idx["heat_index"], 60))
     idx["frost_trigger"] = idx["frost_index"] > tf
