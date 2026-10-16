@@ -62,6 +62,8 @@
   if (offSeason) notes.push(`<div class="card" style="grid-column:1/-1;border-color:#4aa8ff"><div class="k">季节提示</div><div class="v" style="font-size:15px;color:#cfe0ee">当前为非春采期（春采季 3–4 月）：采摘窗口/排班仅供参考，请以园间养护为主</div></div>`);
   document.getElementById("cards").innerHTML = notes.join("") + cards.map(c =>
     `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="s">${c.s}</div></div>`).join("");
+  const _rt = document.getElementById("riskTitle");
+  if (_rt) _rt.textContent = "复合风险与采摘适宜度（近 " + Math.min(hist.length, 60) + " 天 + 未来 " + fc.length + " 天）";
 
   /* ---------------- 图表数据 ---------------- */
   const recent60 = hist.slice(-60);
