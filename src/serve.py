@@ -407,17 +407,27 @@ def _ensure_raw():
         if not os.path.exists(ap):
             blob = store.get_raw("weather_archive.json")
             base = os.path.join(ROOT, "data", "archive_baseline.json")
-            if blob:
-                open(ap, "w", encoding="utf-8").write(blob)
-                print("[serve] 从数据库恢复 archive 缓存")
-            elif os.path.exists(base):   # 仓库完整基线归档（2015+），避免长历史分析退化
-                blob = open(base, encoding="utf-8").read()
-                open(ap, "w", encoding="utf-8").write(blob)
+            baseblob = None
+            if os.path.exists(base):
                 try:
-                    store.set_raw("weather_archive.json", blob)
+                    baseblob = open(base, encoding="utf-8").read()
+                except Exception:  # noqa: BLE001
+                    baseblob = None
+
+            def _n(b):
+                try:
+                    return len(json.loads(b).get("daily", {}).get("time", []))
+                except Exception:  # noqa: BLE001
+                    return 0
+            # 取"更长"的归档（完整基线优先），避免被短归档污染
+            pick = blob if _n(blob or "") >= _n(baseblob or "") else baseblob
+            if pick:
+                open(ap, "w", encoding="utf-8").write(pick)
+                try:
+                    store.set_raw("weather_archive.json", pick)
                 except Exception:  # noqa: BLE001
                     pass
-                print("[serve] 由仓库基线归档恢复 archive 缓存")
+                print("[serve] 恢复 archive 缓存（天数=%d）" % _n(pick))
             else:
                 hist = [x for x in _load().get("days", []) if x.get("source") == "history"]
                 if hist:
