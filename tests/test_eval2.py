@@ -836,6 +836,13 @@ def test_auto_refresh_endpoint_public(monkeypatch):
     assert r.json().get("status") == "fresh"           # 数据新鲜时不触发刷新
 
 
+def test_plot_context_in_chain():
+    import qa.engine as e
+    r = e.answer("地块(120.1000, 30.2215，海拔101m，坡度5°，坡向265°)霜冻易感极高，要不要防冻？")
+    txt = " ".join([str(r.get("text", ""))] + [str(c) for c in (r.get("chain") or [])])
+    assert "地块" in txt and ("海拔" in txt or "下推" in txt)
+
+
 def test_qa_review_requires_admin(monkeypatch):
     import serve
     monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")

@@ -570,6 +570,19 @@ def answer(question, context=None, history=None, state=None):
                 r["text"] = tbl
                 r["format"] = "table"
         if isinstance(r.get("text"), str) and r.get("format") not in ("json", "table") and r.get("intent") not in ("cancel", "memory"):
+            # 地块上下文：把该点地形/下推数据写进答案与来源链（点选地块 → 可追溯）
+            try:
+                from . import plotctx
+                _pc = plotctx.parse(question)
+                if _pc and r.get("intent") not in ("task_ref",):
+                    _ctx = plotctx.lookup(_pc[0], _pc[1], _load_data())
+                    if _ctx and not _ctx.get("out_of_aoi") and _ctx.get("tmin") is not None:
+                        r["text"] = (f"【地块】海拔{_ctx['elev_m']}m·坡向{_ctx['aspect_deg']}°·"
+                                     f"下推Tmin {_ctx['tmin']}℃ → ") + r["text"]
+                    if _ctx:
+                        r["chain"] = [plotctx.chain_text(_ctx)] + list(r.get("chain") or [])
+            except Exception:  # noqa: BLE001
+                pass
             r["text"] = _final_guard(q, r["text"], (st.get("active_date") if isinstance(st, dict) else None))
         r["state"] = st
     except Exception:  # noqa: BLE001
