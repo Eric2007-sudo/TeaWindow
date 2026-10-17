@@ -843,6 +843,14 @@ def test_plot_context_in_chain():
     assert "地块" in txt and ("海拔" in txt or "下推" in txt)
 
 
+def test_plot_series_multiday():
+    import qa.engine as e
+    r = e.answer("地块(120.1000, 30.2215)未来3天怎么管？")
+    assert r["intent"] == "plot_series"
+    assert r["text"].count("Tmin") >= 3                 # 逐日下推
+    assert any("地块上下文" in str(c) for c in r.get("chain") or [])
+
+
 def test_qa_review_requires_admin(monkeypatch):
     import serve
     monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")

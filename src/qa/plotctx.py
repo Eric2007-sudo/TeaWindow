@@ -85,3 +85,46 @@ def chain_text(ctx):
     if ctx.get("tmin") is not None:
         s += f" · 下推 Tmin {ctx['tmin']}℃/Tmax {ctx['tmax']}℃ · R={ctx['R']}（{ctx['level']}）"
     return s
+
+
+def _hazards(tmin, tmax, drought, dry_run=0, deficit=0):
+    fs = max(0.0, min(1.0, (2.0 - tmin) / 4.0))
+    hs = max(0.0, min(1.0, (tmax - 33.0) / 5.0))
+    # 干旱项随当日"连续少雨/水分亏缺"变化（地形干燥度做权重）
+    dryness = max(min(float(dry_run or 0) / 10.0, 1.0), min(max(float(deficit or 0), 0) / 45.0, 1.0))
+    ds = dryness * (0.6 + 0.4 * float(drought or 0))
+    R = max(fs, hs, ds)
+    return round(R, 2), _cls(R)
+
+
+def series(lon, lat, data, n=3, scope="next"):
+    """地块级多日时序（下推）：返回 [(date, tmin, tmax, precip, R, level)]。"""
+    g = _grid()
+    cells = g.get("cells") or []
+    if not cells:
+        return []
+    best, bd = None, 1e9
+    for c in cells:
+        d = (c.get("lon", 0) - lon) ** 2 + (c.get("lat", 0) - lat) ** 2
+        if d < bd:
+            bd, best = d, c
+    if not best or best.get("dtmin") is None:
+        return []
+    days = (data or {}).get("days", [])
+    fc = [x for x in days if x.get("source") == "forecast"]
+    hist = [x for x in days if x.get("source") == "history"]
+    if scope == "past":
+        sub = hist[-n:]
+    elif scope == "all":
+        sub = (hist[-n:] if scope == "past" else []) + fc[:n]
+    else:
+        sub = fc[:n]
+    out = []
+    for d in sub:
+        tmin = round(float(d.get("tmin") or 0) + float(best["dtmin"]), 1)
+        tmax = round(float(d.get("tmax") or 30) + float(best.get("dtmax") or 0), 1)
+        R, level = _hazards(tmin, tmax, best.get("drought"), d.get("dry_run"), d.get("deficit"))
+        out.append({"date": d.get("date"), "tmin": tmin, "tmax": tmax,
+                    "precip": d.get("precip"), "R": R, "level": level,
+                    "site_risk": d.get("risk_level")})
+    return out

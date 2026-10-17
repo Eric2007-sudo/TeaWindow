@@ -541,6 +541,45 @@ def _parse_fields(q):
 
 def answer(question, context=None, history=None, state=None):
     q = _normalize(question)
+    # 地块级多日时序："这块地最近/未来 N 天怎么管"
+    try:
+        from . import plotctx
+        _pc = plotctx.parse(question)
+        if _pc:
+            _m = re.search(r"(最近|过去|未来|接下来|往后)\s*([0-9一二三四五六七]+)?\s*天", q) or \
+                 re.search(r"(这几天|近几天|未来几天)", q)
+            if _m:
+                _scope = "past" if ("最近" in q or "过去" in q) else "next"
+                _n = 3
+                try:
+                    if _m.lastindex and _m.lastindex >= 2 and _m.group(2):
+                        _t = _m.group(2)
+                        from . import nlg as _nl
+                        _n = int(_t) if _t.isdigit() else _nl._cn2num(_t)
+                except Exception:  # noqa: BLE001
+                    _n = 3
+                _n = max(1, min(int(_n), 7))
+                _ctx = plotctx.lookup(_pc[0], _pc[1], _load_data())
+                _ser = plotctx.series(_pc[0], _pc[1], _load_data(), n=_n, scope=_scope)
+                if _ser:
+                    _lab = "最近" if _scope == "past" else "未来"
+                    _lines = [f"地块({_pc[0]}, {_pc[1]}) {_lab} {len(_ser)} 天（下推）："]
+                    for _x in _ser:
+                        _lines.append(f"- {_x['date']} Tmin {_x['tmin']} / Tmax {_x['tmax']}℃ · 雨 {_x['precip']}mm · R={_x['R']}（{_x['level']}）")
+                    _worst = max(_ser, key=lambda x: x["R"])
+                    _flat = len({x["R"] for x in _ser}) == 1
+                    _tail = ("各日风险相近（R≈%s）；" % _ser[0]["R"]) if _flat else (f"重点关注 {_worst['date']}（{_worst['level']}，R={_worst['R']}）；")
+                    _lines.append(_tail
+                                  + ("建议防冻/覆盖，夜晨低温" if any(x["tmin"] <= 2 for x in _ser)
+                                     else "建议傍晚补水、关注高温/干旱" if any(x["tmax"] >= 33 for x in _ser)
+                                     else "常规养护，关注最新预报"))
+                    return {"engine": "teawindow-own", "mode": "rules", "intent": "plot_series", "confidence": 0.9,
+                            "backend": intent_backend(), "retrieval": retrieval_backend(), "slots": {}, "detail": True,
+                            "follow_up": False, "text": "\n".join(_lines),
+                            "chain": ([plotctx.chain_text(_ctx)] if _ctx else []) + ["地块时序: 下推 Tmin/Tmax + 风险规则"],
+                            "state": {"plot": f"{_pc[0]},{_pc[1]}", "active_date": _ser[0]["date"]}}
+    except Exception:  # noqa: BLE001
+        pass
     # 地块上下文块（"地块(lon, lat …)"）不参与任务规划，避免坐标逗号被当成并列
     q_plan = q
     try:
