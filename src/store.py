@@ -29,7 +29,8 @@ _conn = None
 
 SENSOR_FIELDS = ("temp", "rh", "soil_moisture", "soil_temp", "precip", "wind", "light", "vpd")
 _UPSERT_PK = {"devices": "device_id", "forecast_days": "version_id,date", "refresh_state": "k",
-              "alerts_state": "k", "data_json": "k", "raw_cache": "k", "nonces": "nonce"}
+              "alerts_state": "k", "data_json": "k", "raw_cache": "k", "nonces": "nonce",
+              "stations": "station_id"}
 
 
 def _tr(sql):
@@ -116,6 +117,7 @@ def _ddl():
         "CREATE TABLE IF NOT EXISTS data_json(k TEXT PRIMARY KEY, ts TEXT, blob TEXT)",
         "CREATE TABLE IF NOT EXISTS raw_cache(k TEXT PRIMARY KEY, ts TEXT, blob TEXT)",
         f"CREATE TABLE IF NOT EXISTS qa_logs(id {ai}, ts TEXT, anon TEXT, lang TEXT, question TEXT, intent TEXT, answer TEXT, engine TEXT, relevant INTEGER, teacher TEXT, teacher_model TEXT, reviewed INTEGER DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS stations(station_id TEXT PRIMARY KEY, name TEXT, lat REAL, lon REAL, plot TEXT, ts TEXT)",
     ]
 
 
@@ -567,6 +569,23 @@ def qa_log_set(id_, teacher=None, teacher_model=None, relevant=None, reviewed=1)
 def qa_log_count():
     with _LOCK:
         return int(_db().execute("SELECT COUNT(*) FROM qa_logs").fetchone()[0])
+
+
+# ---------------- 传感器站点（支持多站 + 逐地块坐标） ----------------
+def set_station(rec):
+    with _LOCK:
+        c = _db()
+        c.execute("INSERT OR REPLACE INTO stations(station_id,name,lat,lon,plot,ts) VALUES(?,?,?,?,?,?)",
+                  (rec.get("station_id"), rec.get("name", ""), rec.get("lat"), rec.get("lon"),
+                   rec.get("plot", ""), datetime_now()))
+        c.commit()
+
+
+def get_stations():
+    with _LOCK:
+        rows = _db().execute("SELECT station_id,name,lat,lon,plot,ts FROM stations ORDER BY station_id").fetchall()
+    keys = ("station_id", "name", "lat", "lon", "plot", "ts")
+    return [dict(zip(keys, r)) for r in rows]
 
 
 # ---------------- 盲测评估：预测快照 × 田间结果（事件级） ----------------

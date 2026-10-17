@@ -40,9 +40,10 @@
   <div class="sub" id="sub">梅家坞茶园 AOI · DEM 山体阴影 + 逐格点风险下推（海拔递减 + 冷池/坡向）· 点击地块可直接提问</div>
 
   <div class="bar">
-    <button id="bRisk" class="on">综合风险（下推）</button>
-    <button id="bFrost">霜冻易感</button>
-    <button id="bHeat">高温/旱易感</button>
+    <button id="bRisk" class="on">综合风险（实时）</button>
+    <button id="bFrost">霜冻</button>
+    <button id="bHeat">高温</button>
+    <button id="bDrought">干旱</button>
     <button id="bHill">仅地形</button>
     <span class="lg"><span class="sw" style="background:#3fb950"></span>低
       <span class="sw" style="background:#d6b657"></span>中
@@ -63,6 +64,7 @@
       <div style="font-weight:600;margin-bottom:6px" id="toptitle">本日高风险地块（下推）</div>
       <table id="top"><thead><tr><th>位置(经纬)</th><th>海拔</th><th>R</th><th>等级</th></tr></thead><tbody></tbody></table>
       <div class="lg" id="base"></div>
+      <div class="lg" id="stations"></div>
       <div style="color:var(--muted);font-size:12.5px;margin-top:10px" id="method"></div>
       <div style="color:var(--muted);font-size:12.5px;margin-top:6px">提示：在地图上<b>点击任意位置</b>，会自动生成该点的地块数据（海拔/坡度/坡向 + 下推天气 + 风险 R + 建议）。</div>
       <div class="card" id="plotCard" style="margin-top:10px;display:none"></div>
@@ -72,7 +74,7 @@
 <script>
 (function () {
   var $ = function (s) { return document.querySelector(s); };
-  var G = null, SITE = null, MODE = "risk";
+  var G = null, SITE = null, MODE = "risk", METRIC = "risk", STATIONS = [];
   var lyr = $("#lyr"), cv = $("#cv"), tip = $("#tip"), map = $("#map");
 
   function riskCls(v) { return v >= 0.75 ? "极高" : v >= 0.6 ? "高" : v >= 0.4 ? "中" : "低"; }
@@ -81,14 +83,18 @@
     var r = Math.max(0, Math.min(1, (v - 0.5) * 2)), g = Math.max(0, Math.min(1, 1 - Math.abs(v - 0.5) * 2)), b = Math.max(0, Math.min(1, (0.5 - v) * 2));
     return "rgba(" + Math.round(r * 255) + "," + Math.round(g * 255) + "," + Math.round(b * 255) + ",0.72)";
   }
-  function cellR(c) {
+  function metricOf(c, m) {
     if (!SITE || c.dtmin == null) return c.R;
     var tmin = SITE.tmin + c.dtmin, tmax = (SITE.tmax || 30) + c.dtmax;
     var fs = Math.max(0, Math.min(1, (2 - tmin) / 4));
     var hs = Math.max(0, Math.min(1, (tmax - 33) / 5));
     var ds = (c.drought || 0) * 0.6;
+    if (m === "frost") return fs;
+    if (m === "heat") return hs;
+    if (m === "drought") return ds;
     return Math.max(fs, hs, ds);
   }
+  function cellR(c) { return metricOf(c, "risk"); }
   function drawRisk() {
     if (!G) return;
     var img = map.querySelector("img.ph");
@@ -96,36 +102,53 @@
     cv.width = W; cv.height = H;
     var ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, W, H);
-    var step = max(1, G.cells.length ? 0 : 1);  // placeholder (replaced below)
-    var nx = G.nx, ny = G.ny, k = 0;
-    var cw = W / nx, ch = H / ny;
-    // 依序（行优先）重建
+    var nx = G.nx, ny = G.ny, cw = W / nx, ch = H / ny;
+    if (G.cells.length !== nx * ny) {   // 兜底：按近似方阵重排
+      nx = Math.round(Math.sqrt(G.cells.length * (W / H) / (H / W) * (H / W)));
+      nx = Math.max(1, Math.round(Math.sqrt(G.cells.length * W / H)));
+      ny = Math.ceil(G.cells.length / nx);
+      cw = W / nx; ch = H / ny;
+    }
     for (var j = 0; j < ny; j++) {
       for (var i = 0; i < nx; i++) {
         var c = G.cells[j * nx + i];
         if (!c) continue;
-        ctx.fillStyle = colorFor(cellR(c));
+        ctx.fillStyle = colorFor(metricOf(c, METRIC));
         ctx.fillRect(i * cw, j * ch, cw + 1, ch + 1);
       }
     }
+    drawMarkers(ctx, W, H);
+  }
+  function drawMarkers(ctx, W, H) {
+    if (!G || !STATIONS.length) return;
+    STATIONS.forEach(function (s) {
+      if (s.lat == null || s.lon == null) return;
+      var x = (s.lon - G.bbox[0]) / (G.bbox[2] - G.bbox[0]) * W;
+      var y = (G.bbox[3] - s.lat) / (G.bbox[3] - G.bbox[1]) * H;
+      if (x < 0 || x > W || y < 0 || y > H) return;
+      ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = (s.status === "ok" || (s.age_seconds != null && s.age_seconds < 7200)) ? "#4aa8ff" : "#8aa0b2";
+      ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = "#0b1219"; ctx.stroke();
+    });
   }
   function max(a, b) { return a > b ? a : b; }
 
   function setMode(m) {
     MODE = m;
+    METRIC = (m === "hill") ? "risk" : m;
     $("#bRisk").classList.toggle("on", m === "risk");
     $("#bFrost").classList.toggle("on", m === "frost");
     $("#bHeat").classList.toggle("on", m === "heat");
+    $("#bDrought").classList.toggle("on", m === "drought");
     $("#bHill").classList.toggle("on", m === "hill");
-    cv.style.display = m === "risk" ? "block" : "none";
-    lyr.style.display = m === "risk" || m === "hill" ? "none" : "block";
-    if (m === "frost") lyr.src = "terrain_frost.png";
-    if (m === "heat") lyr.src = "terrain_heat.png";
-    if (m === "risk") drawRisk();
+    cv.style.display = m === "hill" ? "none" : "block";
+    lyr.style.display = "none";
+    if (m !== "hill") drawRisk();
   }
   $("#bRisk").onclick = function () { setMode("risk"); };
   $("#bFrost").onclick = function () { setMode("frost"); };
   $("#bHeat").onclick = function () { setMode("heat"); };
+  $("#bDrought").onclick = function () { setMode("drought"); };
   $("#bHill").onclick = function () { setMode("hill"); };
 
   function nearest(lon, lat) {
@@ -196,14 +219,33 @@
   fetch("terrain_grid.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (g) {
     G = g;
     $("#method").textContent = g.method + "（分辨率≈" + g.res_m + " m/px）";
+    function refreshData() {
     fetch("api/overview", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
       var fc = (d.days || []).filter(function (x) { return x.source === "forecast"; });
       if (fc.length) { SITE = fc[0]; }
       renderTop(); drawRisk();
       $("#base").innerHTML = "站点基准（" + (SITE ? SITE.date : "-") + "）：R=" + (SITE ? SITE.risk_R : "-") +
-        "（" + (SITE ? SITE.risk_level : "-") + "）· Tmin " + (SITE ? SITE.tmin : "-") + "℃。地图为**地形下推后的相对差异**。";
+        "（" + (SITE ? SITE.risk_level : "-") + "）· Tmin " + (SITE ? SITE.tmin : "-") + "℃ · 更新 " +
+        (d.updated || "-") + "。地图为**地形下推后的实时相对差异**（每 60 秒自动刷新）。";
     }).catch(function () { renderTop(); drawRisk(); });
-  }).catch(function () { $("#method").textContent = "地形数据未生成：请运行 python src/terrain_map.py"; });
+    fetch("api/sensors", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+      STATIONS = d.stations || []; drawRisk(); renderStations(d);
+    }).catch(function () {});
+  }
+  refreshData();
+  setInterval(refreshData, 60000);
+
+  function renderStations(d) {
+    var box = $("#stations");
+    if (!box) return;
+    var st = (d.stations || []);
+    if (!st.length) { box.innerHTML = "现场传感器：<b>尚未登记</b>（支持多站；可用 <code>POST /api/station</code> 登记地块站点，<code>POST /api/sensor</code> 上报）。"; return; }
+    box.innerHTML = "现场传感器 " + st.length + " 站：" + st.map(function (s) {
+      var ok = (s.age_seconds != null && s.age_seconds < 7200);
+      return "<b style='color:" + (ok ? "#4aa8ff" : "#8aa0b2") + "'>" + (s.name || s.station_id) + "</b>" +
+        (s.plot ? "(" + s.plot + ")" : "") + (s.temp != null ? " " + s.temp + "℃" : "");
+    }).join(" · ");
+  }
 
   function renderTop() {
     var tb = $("#top").querySelector("tbody"); tb.innerHTML = "";
@@ -222,6 +264,7 @@
     });
   }
   window.addEventListener("resize", drawRisk);
+  }).catch(function () { $("#method").textContent = "地形数据未生成：请运行 python src/terrain_map.py"; });
 })();
 </script>
 </body>

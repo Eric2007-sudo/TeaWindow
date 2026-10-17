@@ -149,25 +149,30 @@ def main():
     else:
         R_cell = None
 
-    # 下采样网格（供悬停查询）
+    # 下采样网格（供绘制/悬停查询）：按真实行列输出，保证 JS 的 nx*ny 与 cells 一一对应
     step = max(1, H // 44)
-    g = {"bbox": BBOX, "z": z, "res_m": round(res_m, 1), "nx": W // step, "ny": H // step,
-         "cells": []}
-    for j in range(0, H - step, step):
-        for i in range(0, W - step, step):
+    rows = []
+    for j in range(0, H - step + 1, step):
+        row = []
+        for i in range(0, W - step + 1, step):
             v_f = float(frost[j:j + step, i:i + step].mean())
             v_h = float(heat[j:j + step, i:i + step].mean())
-            g["cells"].append({"lon": round(float(lons[i + step // 2]), 5),
-                               "lat": round(float(lats[j + step // 2]), 5),
-                               "elev": int(round(float(elev[j:j + step, i:i + step].mean()))),
-                               "slope": round(float(slope[j:j + step, i:i + step].mean()), 1),
-                               "aspect": int(round(float(aspect[j:j + step, i:i + step].mean()))),
-                               "frost": round(v_f, 2), "heat": round(v_h, 2),
-                               "dtmin": round(float(dtmin[j:j + step, i:i + step].mean()), 2),
-                               "dtmax": round(float(dtmax[j:j + step, i:i + step].mean()), 2),
-                               "drought": round(float(np.clip(0.6 * (1 - e_norm) + 0.4 * south, 0, 1)[j:j + step, i:i + step].mean()), 2),
-                               "R": (round(float(R_cell[j:j + step, i:i + step].mean()), 2) if R_cell is not None else None),
-                               "tmin_ds": (round(float((float(site.get("tmin")) + dtmin)[j:j + step, i:i + step].mean()), 1) if site.get("tmin") is not None else None)})
+            row.append({"lon": round(float(lons[i + step // 2]), 5),
+                        "lat": round(float(lats[j + step // 2]), 5),
+                        "elev": int(round(float(elev[j:j + step, i:i + step].mean()))),
+                        "slope": round(float(slope[j:j + step, i:i + step].mean()), 1),
+                        "aspect": int(round(float(aspect[j:j + step, i:i + step].mean()))),
+                        "frost": round(v_f, 2), "heat": round(v_h, 2),
+                        "dtmin": round(float(dtmin[j:j + step, i:i + step].mean()), 2),
+                        "dtmax": round(float(dtmax[j:j + step, i:i + step].mean()), 2),
+                        "drought": round(float(np.clip(0.6 * (1 - e_norm) + 0.4 * south, 0, 1)[j:j + step, i:i + step].mean()), 2),
+                        "R": (round(float(R_cell[j:j + step, i:i + step].mean()), 2) if R_cell is not None else None),
+                        "tmin_ds": (round(float((float(site.get("tmin")) + dtmin)[j:j + step, i:i + step].mean()), 1) if site.get("tmin") is not None else None)})
+        rows.append(row)
+    nx = len(rows[0]) if rows else 0
+    ny = len(rows)
+    g = {"bbox": BBOX, "z": z, "res_m": round(res_m, 1), "step": step, "nx": nx, "ny": ny,
+         "cells": [c for r in rows for c in r]}
 
     def cls(v):
         return "极高" if v >= 0.75 else ("高" if v >= 0.6 else ("中" if v >= 0.4 else "低"))

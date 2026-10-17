@@ -954,6 +954,39 @@ async def sensor_batch(request: Request, req: SensorBatch):
     return {"status": "ok", "accepted": accepted, "count": n}
 
 
+class StationReq(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    station_id: str
+    name: str = ""
+    lat: float
+    lon: float
+    plot: str = ""
+
+
+@app.post("/api/station")
+def station_register(request: Request, req: StationReq):
+    """登记传感器站点（支持多站；可给逐地块坐标）。需 SENSOR_TOKEN/ADMIN_TOKEN。"""
+    _require_sensor(request)
+    store.set_station(req.model_dump())
+    return {"ok": True, "station_id": req.station_id, "count": len(store.get_stations())}
+
+
+@app.get("/api/sensors")
+def sensors_public():
+    """公开只读：已登记站点 + 最新观测摘要（不含隐私）。"""
+    try:
+        latest = {s.get("station_id"): s for s in (store.sensor_latest() or [])}
+    except Exception:  # noqa: BLE001
+        latest = {}
+    out = []
+    for s in store.get_stations():
+        l = latest.get(s.get("station_id"), {}) or {}
+        out.append({**s, "latest": l.get("ts"), "temp": l.get("temp"), "rh": l.get("rh"),
+                    "soil_moisture": l.get("soil_moisture"),
+                    "age_seconds": l.get("age_seconds"), "status": l.get("status")})
+    return {"count": len(out), "stations": out}
+
+
 @app.get("/api/realtime")
 def realtime():
     """公开只读：各站最新观测 + 新鲜度（observed_at/received_at/age_seconds/status）。"""

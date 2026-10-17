@@ -799,6 +799,43 @@ def test_qa_logging_and_isolation(monkeypatch):
     assert ok.status_code == 200 and "pending" in ok.json()
 
 
+def test_terrain_grid_consistency():
+    import json, os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "web", "terrain_grid.json")
+    if not os.path.exists(p):
+        pytest.skip("terrain grid not generated")
+    g = json.load(open(p, encoding="utf-8"))
+    assert g["nx"] * g["ny"] == len(g["cells"])          # JS 按 nx*ny 行优先绘制
+    assert all(("lon" in c and "elev" in c) for c in g["cells"][:5])
+
+
+def test_station_multi_sensor_and_sensors_api(monkeypatch):
+    import store, serve
+    store.set_station({"station_id": "T1", "name": "北坡", "lat": 30.216, "lon": 120.0985, "plot": "北坡茶园"})
+    store.set_station({"station_id": "T2", "name": "溪谷", "lat": 30.2139, "lon": 120.0961, "plot": "梅坞溪谷"})
+    ids = {x["station_id"] for x in store.get_stations()}
+    assert {"T1", "T2"} <= ids                          # 多站登记
+    monkeypatch.setattr(serve, "SENSOR_TOKEN", "st")
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    assert c.post("/api/station", json={"station_id": "T3", "lat": 30.21, "lon": 120.09}).status_code == 403
+    ok = c.post("/api/station", json={"station_id": "T3", "lat": 30.21, "lon": 120.09, "plot": "高处"},
+                headers={"X-Sensor-Token": "st"})
+    assert ok.status_code == 200
+    r = c.get("/api/sensors")
+    assert r.status_code == 200 and r.json()["count"] >= 1
+
+
+def test_qa_review_requires_admin(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")
+    c = _client()
+    assert c.get("/api/qa/logs").status_code == 403          # 非管理员看不到内容
+    assert c.post("/api/qa/review", json={"id": 1}).status_code == 403
+    assert c.get("/api/qa/logs", headers={"X-Admin-Token": "adm"}).status_code == 200
+
+
 def test_lineage_question_routes_to_ops():
     import qa.engine as e
     r = e.answer("当前数据版本的上游 URL、参数、完整 SHA-256 和版本号")
