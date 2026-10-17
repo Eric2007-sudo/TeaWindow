@@ -117,7 +117,8 @@ python src\serve.py              # http://127.0.0.1:8000
 **双击即可离线运行**，适合演示视频录制。包含：风险/适宜度时间线、气温与霜冻/高温信号、
 NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表（含**霜冻/高温概率**）与白话建议、模型指标与数据来源。
 
-**在线活服务**（FastAPI）：见 `deploy/README.md`。内置 `apscheduler` 每日 06:00 全量 + **每 10 分钟轻量**自动刷新；API 见该文档。
+**在线活服务**（FastAPI）：见 `deploy/README.md`。内置 `apscheduler` 每日 06:00 全量 + **约每 15 分钟轻量**自动刷新；API 见该文档。
+> 稳定 10 分钟级刷新：可用外部免费 pinger（cron-job.org / UptimeRobot）定时 `POST https://teawindow.onrender.com/api/refresh?fetch=true`（头 `X-Admin-Token`），同时保活免费层。
 
 ## 6. 数据来源（全部公开、免密钥）
 
@@ -157,6 +158,6 @@ NDVI 植被活力、**地块级地形与霜冻易感**、未来 16 天预报表�
 - **当前状态评估（自评）**：`report/round15_live_assessment.md`（对照第七轮验收；刷新闭环/decision_ready/钉钉送达/JSON 跨轮/否定改口已闭环）
 - **提交前最终整改**：`report/round16_final.md`（含问答分句规划、茶农语料 GPU 重训、Web/演示视频全量复检、全量模拟评测 97.2%）
 - **告警渠道**：`ALERT_WEBHOOK_URL` + `ALERT_WEBHOOK_KIND`（generic/slack/feishu/**dingtalk**，支持加签 `ALERT_WEBHOOK_SECRET`）
-- **外部定时刷新**：`.github/workflows/refresh.yml`（**每 10 分钟**调用线上 `/api/refresh`，轻量仅取预报并保活）
+- **外部定时刷新**：`.github/workflows/refresh.yml`（**每 15 分钟**调用线上 `/api/refresh`，轻量仅取预报并保活；更频繁的 GitHub schedule 会被节流）
 - **许可证**：代码 **MIT**（`LICENSE`）· 数据与文档 **CC BY 4.0**（`LICENSE-DATA.md`）
 - **引用**：见 `CITATION.cff`

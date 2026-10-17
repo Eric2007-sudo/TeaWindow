@@ -1,10 +1,11 @@
 name: Frequent refresh (external cron)
 
 # 解决 Render 免费层休眠导致内置 apscheduler 不触发的问题：
-# 由 GitHub Actions 每 10 分钟调用线上 /api/refresh（轻量：仅预报），并顺带保活。
+# 由 GitHub Actions 每 15 分钟调用线上 /api/refresh（轻量：仅预报），并顺带保活。
+# 注：GitHub 会对高频 schedule 延迟/节流；若要稳定的 10 分钟级，请用外部 pinger（如 cron-job.org）打 /api/refresh。
 on:
   schedule:
-    - cron: "*/10 * * * *"   # 每 10 分钟（UTC），与内置刷新对齐
+    - cron: "*/15 * * * *"   # 每 15 分钟（UTC）；GitHub 会对更频繁的 schedule 节流，故取 15 分钟
   workflow_dispatch:
 
 jobs:
