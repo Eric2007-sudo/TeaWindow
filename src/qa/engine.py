@@ -442,11 +442,13 @@ def _topic_of(clause):
 
 
 def _clause_tasks(q):
-    """自然口语的多维提问：按子句切分，逐一判主题，得到有序任务清单（去重）。"""
-    parts = re.split(r"[，,；;。!！?？]+|还有|还有呢|以及|顺便|另外|再有|然后再|再说|同时|并且", q)
+    """自然口语的多维提问：按子句切分，逐一判主题，得到有序任务清单（去重）。
+    括号内的逗号不切分（避免把 "地块(lon, lat)" 拆开）。"""
+    q2 = re.sub(r"[（(][^（()）]*[)）]", lambda m: m.group(0).replace("，", "\u0001").replace(",", "\u0001"), q)
+    parts = re.split(r"[，,；;。!！?？]+|还有|还有呢|以及|顺便|另外|再有|然后再|再说|同时|并且", q2)
     out, seen = [], set()
     for p in parts:
-        p = (p or "").strip()
+        p = (p or "").replace("\u0001", "，").strip()
         if len(p) < 2:
             continue
         it = _topic_of(p)
@@ -539,7 +541,15 @@ def _parse_fields(q):
 
 def answer(question, context=None, history=None, state=None):
     q = _normalize(question)
-    r = _answer_impl(q, context, history, state)
+    # 地块上下文块（"地块(lon, lat …)"）不参与任务规划，避免坐标逗号被当成并列
+    q_plan = q
+    try:
+        from . import plotctx
+        if plotctx.parse(question):
+            q_plan = re.sub(r"地块\s*[（(][^)）]*[)）]", " ", q).strip() or q
+    except Exception:  # noqa: BLE001
+        q_plan = q
+    r = _answer_impl(q_plan, context, history, state)
     try:
         st = _extract_state(q, history, r, state)
         if isinstance(r.get("state"), dict):
