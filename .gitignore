@@ -20,3 +20,4 @@ data/teawindow.db
 data/teawindow.db-wal
 data/teawindow.db-shm
 .persistence_baseline.json
+~$*
