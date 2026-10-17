@@ -827,6 +827,15 @@ def test_station_multi_sensor_and_sensors_api(monkeypatch):
     assert r.status_code == 200 and r.json()["count"] >= 1
 
 
+def test_auto_refresh_endpoint_public(monkeypatch):
+    import serve
+    monkeypatch.setattr(serve, "_freshness", lambda d=None: {"age_minutes": 1, "stale": False})
+    c = _client()
+    r = c.post("/api/refresh/auto")
+    assert r.status_code == 200
+    assert r.json().get("status") == "fresh"           # 数据新鲜时不触发刷新
+
+
 def test_qa_review_requires_admin(monkeypatch):
     import serve
     monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")

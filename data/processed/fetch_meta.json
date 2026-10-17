@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-10-14 12:54:14",
+  "fetched_at": "2026-10-17 09:18:55",
   "forecast_url": "https://api.open-meteo.com/v1/forecast",
   "forecast_params": {
     "latitude": 30.2139,
@@ -12,10 +12,14 @@
   "archive_params": {
     "latitude": 30.2139,
     "longitude": 120.0961,
+    "start_date": "2015-01-01",
+    "end_date": "2026-10-15",
     "timezone": "Asia/Shanghai"
   },
-  "forecast_raw_sha256": "ee78cc3da6bd577c327cc1fe29cd4710945f618de9bd39baece63dd22939d590",
+  "forecast_raw_sha256": "f189cc66a398b30a996107eb056df5f5997a1dc96be9b9558e3b52f67030d25b",
   "archive_raw_sha256": "87d632f845a31d6c70a5c6aaa8314072786bf42d8cae023601b028ce78061fa5",
+  "forecast_source": "open-meteo",
+  "om_api_key": false,
   "lat": 30.2139,
   "lon": 120.0961,
   "timezone": "Asia/Shanghai"

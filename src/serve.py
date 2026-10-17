@@ -1039,6 +1039,26 @@ def sensor_latest(request: Request, station_id: str = "", limit: int = 20):
 
 # ---- 物候/灾情上报（众包）已在上方 /api/report ----
 
+@app.post("/api/refresh/auto")
+def refresh_auto(request: Request):
+    """公共"按需自愈"刷新：数据超过 AUTO_REFRESH_MIN 分钟（默认 20）才触发一次轻量刷新。
+    - 无需令牌（有速率限制），用于免费层休眠后由任意访问者自动预热/刷新。"""
+    ip = request.client.host if request.client else "global"
+    _rate_limit("auto:" + ip, limit=int(os.environ.get("AUTO_REFRESH_RPM", "6")))
+    try:
+        fr = _freshness()
+        age = fr.get("age_minutes")
+    except Exception:  # noqa: BLE001
+        age = None
+    thr = int(os.environ.get("AUTO_REFRESH_MIN", "20"))
+    if age is not None and age < thr:
+        return {"status": "fresh", "age_minutes": age, "threshold_minutes": thr}
+    if _refresh_lock.locked():
+        return {"status": "running", "age_minutes": age}
+    threading.Thread(target=_refresh, args=(True, True), daemon=True).start()
+    return {"status": "scheduled", "age_minutes": age, "threshold_minutes": thr}
+
+
 @app.post("/api/refresh")
 def refresh(request: Request, background: BackgroundTasks, fetch: bool = True, full: bool = False):
     _require_admin(request)
