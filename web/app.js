@@ -2,9 +2,21 @@
 (async function () {
   let D = window.TW_DATA;              // 离线内嵌数据（data.js）
   let online = false;
-  try {                                 // 在线模式：优先实时 API
-    const r = await fetch("api/overview", { cache: "no-store" });
-    if (r.ok) { D = await r.json(); online = true; }
+  const LIVE = "https://teawindow.onrender.com";   // 静态站(GitHub Pages)在线时回退到线上 API
+  async function tryApi(base) {
+    try {
+      const r = await fetch(base + "/api/overview", { cache: "no-store" });
+      if (r.ok) return await r.json();
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  try {
+    const same = await tryApi("");                  // 线上（同源）
+    if (same && same.days) { D = same; online = true; }
+    else {
+      const live = await tryApi(LIVE);              // 静态站 → 跨域回退到线上
+      if (live && live.days) { D = live; online = true; }
+    }
   } catch (e) { /* 离线：忽略，使用内嵌数据 */ }
   if (!D) { alert("数据未加载：在线需 /api/overview，离线需 data.js"); return; }
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,

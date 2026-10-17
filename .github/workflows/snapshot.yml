@@ -1,0 +1,45 @@
+name: Snapshot (refresh committed data.js)
+
+# 让 GitHub Pages 静态站的内嵌快照保持较新：定时拉取线上 /data.json，写回 web/data.json + data.js 并提交。
+# （静态页在线时也会通过 CORS 回退到线上 API；此工作流保证"离线快照"不过期太旧。）
+on:
+  schedule:
+    - cron: "15 */6 * * *"   # 每 6 小时
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch live data.json
+        run: |
+          curl -sS -m 120 --retry 4 --retry-delay 15 --retry-all-errors \
+            "https://teawindow.onrender.com/api/health" >/dev/null || true
+          curl -sS -m 120 --retry 4 --retry-delay 15 --retry-all-errors \
+            -o /tmp/data.json "https://teawindow.onrender.com/data.json" || true
+          python - <<'PY'
+          import json,sys,io,os
+          try:
+              d=json.load(open('/tmp/data.json',encoding='utf-8'))
+          except Exception as e:
+              print('fetch/parse failed:',e); sys.exit(0)
+          if not d.get('days'):
+              print('no days, skip'); sys.exit(0)
+          blob=json.dumps(d,ensure_ascii=False)
+          io.open('web/data.json','w',encoding='utf-8').write(blob)
+          io.open('web/data.js','w',encoding='utf-8').write('window.TW_DATA = '+blob+';\n')
+          print('snapshot fetched_at=',d.get('meta',{}).get('fetched_at'))
+          PY
+      - name: Commit & push
+        run: |
+          git config user.name  "teawindow-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add web/data.json web/data.js
+          if git diff --cached --quiet; then echo "no change"; else
+            git commit -m "chore(snapshot): refresh committed data.js from live [skip ci]"
+            git push
+          fi

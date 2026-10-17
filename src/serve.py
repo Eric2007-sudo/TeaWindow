@@ -82,6 +82,20 @@ app = FastAPI(title="TeaWindow API", version="1.0",
               description="梅家坞龙井复合气候风险与采摘窗口决策助手",
               lifespan=_lifespan)
 
+# CORS：允许静态站（GitHub Pages）与本地在浏览器直接调用线上只读 API
+try:
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["https://eric2007-sudo.github.io", "http://localhost:8000",
+                       "http://127.0.0.1:8000", "http://localhost:5500"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "X-Admin-Token", "X-Sensor-Token"],
+        max_age=600,
+    )
+except Exception:  # noqa: BLE001
+    pass
+
 # 请求体上限（P0-4：超大 body 在网络/解析前拒绝）
 MAX_BODY = int(os.environ.get("MAX_BODY_BYTES", "65536"))
 # LLM 每日预算（P0-4：昂贵调用独立配额）
