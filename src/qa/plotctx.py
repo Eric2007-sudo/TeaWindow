@@ -68,11 +68,8 @@ def lookup(lon, lat, data):
     if day.get("tmin") is not None and best.get("dtmin") is not None:
         tmin = round(float(day["tmin"]) + float(best["dtmin"]), 1)
         tmax = round(float(day.get("tmax") or 30) + float(best.get("dtmax") or 0), 1)
-        fs = max(0.0, min(1.0, (2.0 - tmin) / 4.0))
-        hs = max(0.0, min(1.0, (tmax - 33.0) / 5.0))
-        ds = float(best.get("drought") or 0) * 0.6
-        R = max(fs, hs, ds)
-        out.update({"tmin": tmin, "tmax": tmax, "R": round(R, 2), "level": _cls(R)})
+        R, level = _hazards(tmin, tmax, best.get("drought"), day.get("dry_run"), day.get("deficit"))
+        out.update({"tmin": tmin, "tmax": tmax, "R": R, "level": level})
     return out
 
 
