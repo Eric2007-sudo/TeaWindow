@@ -123,6 +123,32 @@ def main():
     Image.fromarray(overlay(frost)).save(os.path.join(WEB, "terrain_frost.png"))
     Image.fromarray(overlay(heat)).save(os.path.join(WEB, "terrain_heat.png"))
 
+    # ---- 逐格点风险下推：站点预报 → 每格点（海拔递减率 + 冷池/坡向修正）----
+    ref = float(np.median(elev))
+    dtmin = -0.0065 * (elev - ref) - 1.5 * (1 - e_norm)          # 高海拔更冷 + 低洼积冷
+    dtmax = -0.0065 * (elev - ref) + 1.2 * south                 # 高海拔更凉 + 南向更晒
+    site = {}
+    try:
+        _d = json.load(open(os.path.join(WEB, "data.json"), encoding="utf-8"))
+        _fc = [x for x in _d.get("days", []) if x.get("source") == "forecast"]
+        if _fc:
+            day = max(_fc, key=lambda x: (x.get("risk_R") or 0))
+            site = {"date": day.get("date"), "tmin": day.get("tmin"), "tmax": day.get("tmax"),
+                    "risk_R": day.get("risk_R"), "risk_level": day.get("risk_level"),
+                    "season": (_d.get("meta", {}) or {}).get("season", "off")}
+    except Exception:  # noqa: BLE001
+        pass
+    if site.get("tmin") is not None:
+        tmin_c = float(site["tmin"]) + dtmin
+        tmax_c = float(site["tmax"] or 30) + dtmax
+        frost_s = np.clip((2.0 - tmin_c) / 4.0, 0, 1)             # Tmin≤2℃ 进入霜冻
+        heat_s = np.clip((tmax_c - 33.0) / 5.0, 0, 1)             # Tmax≥33℃ 进入高温
+        drought_s = np.clip(0.6 * (1 - e_norm) + 0.4 * south, 0, 1) * 0.6
+        R_cell = np.clip(np.maximum.reduce([frost_s, heat_s, drought_s]), 0, 1)
+        Image.fromarray(overlay(R_cell)).save(os.path.join(WEB, "terrain_risk.png"))
+    else:
+        R_cell = None
+
     # 下采样网格（供悬停查询）
     step = max(1, H // 44)
     g = {"bbox": BBOX, "z": z, "res_m": round(res_m, 1), "nx": W // step, "ny": H // step,
@@ -136,7 +162,12 @@ def main():
                                "elev": int(round(float(elev[j:j + step, i:i + step].mean()))),
                                "slope": round(float(slope[j:j + step, i:i + step].mean()), 1),
                                "aspect": int(round(float(aspect[j:j + step, i:i + step].mean()))),
-                               "frost": round(v_f, 2), "heat": round(v_h, 2)})
+                               "frost": round(v_f, 2), "heat": round(v_h, 2),
+                               "dtmin": round(float(dtmin[j:j + step, i:i + step].mean()), 2),
+                               "dtmax": round(float(dtmax[j:j + step, i:i + step].mean()), 2),
+                               "drought": round(float(np.clip(0.6 * (1 - e_norm) + 0.4 * south, 0, 1)[j:j + step, i:i + step].mean()), 2),
+                               "R": (round(float(R_cell[j:j + step, i:i + step].mean()), 2) if R_cell is not None else None),
+                               "tmin_ds": (round(float((float(site.get("tmin")) + dtmin)[j:j + step, i:i + step].mean()), 1) if site.get("tmin") is not None else None)})
 
     def cls(v):
         return "极高" if v >= 0.75 else ("高" if v >= 0.6 else ("中" if v >= 0.4 else "低"))
@@ -144,8 +175,14 @@ def main():
     for c in g["cells"]:
         c["frost_risk"] = cls(c["frost"])
         c["heat_risk"] = cls(c["heat"])
+        if c.get("R") is not None:
+            c["risk"] = cls(c["R"])
     top = sorted(g["cells"], key=lambda c: -c["frost"])[:8]
     g["top_frost"] = [{"lon": c["lon"], "lat": c["lat"], "elev": c["elev"], "frost_risk": c["frost_risk"], "frost": c["frost"]} for c in top]
+    g["site"] = site
+    g["date"] = site.get("date")
+    g["top_risk"] = [{"lon": c["lon"], "lat": c["lat"], "elev": c["elev"], "R": c.get("R"), "risk": c.get("risk")}
+                     for c in sorted(g["cells"], key=lambda c: -(c.get("R") or 0))[:8]]
     g["method"] = "AWS Terrain Tiles(Terrarium DEM) + 有限差分坡度/坡向；霜冻易感=低海拔+北向+缓坡；高温/旱=低海拔+南向+缓坡；为相对差异，非地块实勘。"
     with open(os.path.join(WEB, "terrain_grid.json"), "w", encoding="utf-8") as f:
         json.dump(g, f, ensure_ascii=False)

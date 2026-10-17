@@ -153,4 +153,10 @@
   if (!messages.length) {
     add("你好，我是梅坞采候助手。我能回答：风险、霜冻/高温、干旱/灌溉、连雨、采摘窗口、地块、保险与损失、开采期、数据与模型说明；非茶园问题我会拒答。点下方快捷问题即可开始。", "bot", "欢迎 · 能力边界");
   }
+
+  // 支持从"地块风险图"等页面带问题跳转：chat.html?q=...
+  try {
+    const qp = new URLSearchParams(location.search).get("q");
+    if (qp && qp.trim()) { input.value = qp.trim(); submit(qp.trim()); }
+  } catch (e) { /* ignore */ }
 })();

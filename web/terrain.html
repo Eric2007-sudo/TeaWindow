@@ -18,16 +18,18 @@
   button.on{background:#12324a;border-color:#1d4a6b;color:#cfe0ee}
   .grid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px}
   @media(max-width:820px){.grid{grid-template-columns:1fr}}
-  .map{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#000}
-  .map img{display:block;width:100%;position:absolute;inset:0}
-  .map .ph{position:relative;width:100%}
-  #tip{position:absolute;pointer-events:none;background:rgba(11,18,25,.92);border:1px solid var(--line);
+  .map{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#000;cursor:crosshair}
+  .map img.ph{display:block;width:100%}
+  .map img.lyr{position:absolute;inset:0;width:100%;pointer-events:none}
+  .map canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  #tip{position:absolute;pointer-events:none;background:rgba(11,18,25,.94);border:1px solid var(--line);
        border-radius:8px;padding:6px 9px;font-size:12.5px;line-height:1.5;color:#dfe9f2;transform:translate(8px,-8px);display:none;z-index:5}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
   .lg{display:flex;gap:10px;align-items:center;font-size:12.5px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
   .sw{width:18px;height:10px;border-radius:3px;display:inline-block}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:6px 6px;border-bottom:1px solid var(--line)}
+  tr.click{cursor:pointer} tr.click:hover{background:#12202b}
   .hi{color:#e5534b} .mid{color:#d6b657} .lo{color:#3fb950}
   a{color:var(--accent);text-decoration:none}
 </style>
@@ -35,42 +37,96 @@
 <body>
 <div class="wrap">
   <h1>梅坞采候 <span>TeaWindow</span> · 地块级地形风险图</h1>
-  <div class="sub" id="sub">梅家坞茶园 AOI · DEM 山体阴影 + 地块级霜冻/高温易感叠加（相对差异，非地块实勘）</div>
+  <div class="sub" id="sub">梅家坞茶园 AOI · DEM 山体阴影 + 逐格点风险下推（海拔递减 + 冷池/坡向）· 点击地块可直接提问</div>
 
   <div class="bar">
-    <button id="bFrost" class="on">霜冻易感</button>
+    <button id="bRisk" class="on">综合风险（下推）</button>
+    <button id="bFrost">霜冻易感</button>
     <button id="bHeat">高温/旱易感</button>
     <button id="bHill">仅地形</button>
     <span class="lg"><span class="sw" style="background:#3fb950"></span>低
       <span class="sw" style="background:#d6b657"></span>中
       <span class="sw" style="background:#e5534b"></span>高/极高</span>
     <span style="flex:1"></span>
+    <a href="chat.html">智能问答</a>
     <a href="index.html">← 返回仪表盘</a>
   </div>
 
   <div class="grid">
     <div class="map" id="map">
       <img class="ph" src="terrain_hillshade.png" alt="地形底图">
-      <img id="lyr" src="terrain_frost.png" alt="风险叠加" style="opacity:.75">
+      <img id="lyr" class="lyr" src="terrain_frost.png" alt="风险叠加" style="opacity:.75;display:none">
+      <canvas id="cv"></canvas>
       <div id="tip"></div>
     </div>
     <div class="card">
-      <div style="font-weight:600;margin-bottom:6px">地块级高风险（霜冻）</div>
-      <table id="top"><thead><tr><th>位置(经纬)</th><th>海拔</th><th>等级</th></tr></thead><tbody></tbody></table>
+      <div style="font-weight:600;margin-bottom:6px" id="toptitle">本日高风险地块（下推）</div>
+      <table id="top"><thead><tr><th>位置(经纬)</th><th>海拔</th><th>R</th><th>等级</th></tr></thead><tbody></tbody></table>
       <div class="lg" id="base"></div>
       <div style="color:var(--muted);font-size:12.5px;margin-top:10px" id="method"></div>
+      <div style="color:var(--muted);font-size:12.5px;margin-top:6px">提示：在地图上<b>点击任意位置</b>，会自动生成该点的地块数据（海拔/坡度/坡向 + 下推天气 + 风险 R + 建议）。</div>
+      <div class="card" id="plotCard" style="margin-top:10px;display:none"></div>
     </div>
   </div>
 </div>
 <script>
 (function () {
   var $ = function (s) { return document.querySelector(s); };
-  var G = null;
-  var lyr = $("#lyr"), tip = $("#tip"), map = $("#map");
-  function setLayer(src, op) { lyr.src = src; lyr.style.opacity = op; }
-  $("#bFrost").onclick = function () { setLayer("terrain_frost.png", .75); this.classList.add("on"); $("#bHeat").classList.remove("on"); $("#bHill").classList.remove("on"); };
-  $("#bHeat").onclick = function () { setLayer("terrain_heat.png", .75); this.classList.add("on"); $("#bFrost").classList.remove("on"); $("#bHill").classList.remove("on"); };
-  $("#bHill").onclick = function () { lyr.style.opacity = 0; this.classList.add("on"); $("#bFrost").classList.remove("on"); $("#bHeat").classList.remove("on"); };
+  var G = null, SITE = null, MODE = "risk";
+  var lyr = $("#lyr"), cv = $("#cv"), tip = $("#tip"), map = $("#map");
+
+  function riskCls(v) { return v >= 0.75 ? "极高" : v >= 0.6 ? "高" : v >= 0.4 ? "中" : "低"; }
+  function clsSpan(c) { return c === "高" || c === "极高" ? "hi" : c === "中" ? "mid" : "lo"; }
+  function colorFor(v) {
+    var r = Math.max(0, Math.min(1, (v - 0.5) * 2)), g = Math.max(0, Math.min(1, 1 - Math.abs(v - 0.5) * 2)), b = Math.max(0, Math.min(1, (0.5 - v) * 2));
+    return "rgba(" + Math.round(r * 255) + "," + Math.round(g * 255) + "," + Math.round(b * 255) + ",0.72)";
+  }
+  function cellR(c) {
+    if (!SITE || c.dtmin == null) return c.R;
+    var tmin = SITE.tmin + c.dtmin, tmax = (SITE.tmax || 30) + c.dtmax;
+    var fs = Math.max(0, Math.min(1, (2 - tmin) / 4));
+    var hs = Math.max(0, Math.min(1, (tmax - 33) / 5));
+    var ds = (c.drought || 0) * 0.6;
+    return Math.max(fs, hs, ds);
+  }
+  function drawRisk() {
+    if (!G) return;
+    var img = map.querySelector("img.ph");
+    var W = img.clientWidth, H = img.clientHeight;
+    cv.width = W; cv.height = H;
+    var ctx = cv.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    var step = max(1, G.cells.length ? 0 : 1);  // placeholder (replaced below)
+    var nx = G.nx, ny = G.ny, k = 0;
+    var cw = W / nx, ch = H / ny;
+    // 依序（行优先）重建
+    for (var j = 0; j < ny; j++) {
+      for (var i = 0; i < nx; i++) {
+        var c = G.cells[j * nx + i];
+        if (!c) continue;
+        ctx.fillStyle = colorFor(cellR(c));
+        ctx.fillRect(i * cw, j * ch, cw + 1, ch + 1);
+      }
+    }
+  }
+  function max(a, b) { return a > b ? a : b; }
+
+  function setMode(m) {
+    MODE = m;
+    $("#bRisk").classList.toggle("on", m === "risk");
+    $("#bFrost").classList.toggle("on", m === "frost");
+    $("#bHeat").classList.toggle("on", m === "heat");
+    $("#bHill").classList.toggle("on", m === "hill");
+    cv.style.display = m === "risk" ? "block" : "none";
+    lyr.style.display = m === "risk" || m === "hill" ? "none" : "block";
+    if (m === "frost") lyr.src = "terrain_frost.png";
+    if (m === "heat") lyr.src = "terrain_heat.png";
+    if (m === "risk") drawRisk();
+  }
+  $("#bRisk").onclick = function () { setMode("risk"); };
+  $("#bFrost").onclick = function () { setMode("frost"); };
+  $("#bHeat").onclick = function () { setMode("heat"); };
+  $("#bHill").onclick = function () { setMode("hill"); };
 
   function nearest(lon, lat) {
     var best = null, bd = 1e9;
@@ -80,9 +136,12 @@
     }
     return best;
   }
-  function riskCls(v) { return v >= 0.75 ? "极高" : v >= 0.6 ? "高" : v >= 0.4 ? "中" : "低"; }
-  function clsSpan(c) { return c === "高" || c === "极高" ? "hi" : c === "中" ? "mid" : "lo"; }
-
+  function loc(lon, lat) {
+    var r = map.getBoundingClientRect();
+    var fx = (lon - G.bbox[0]) / (G.bbox[2] - G.bbox[0]);
+    var fy = (G.bbox[3] - lat) / (G.bbox[3] - G.bbox[1]);
+    return [r.left + fx * r.width, r.top + fy * r.height, r];
+  }
   function hover(e) {
     if (!G) return;
     var r = map.getBoundingClientRect();
@@ -90,33 +149,79 @@
     if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { tip.style.display = "none"; return; }
     var lon = G.bbox[0] + fx * (G.bbox[2] - G.bbox[0]);
     var lat = G.bbox[3] - fy * (G.bbox[3] - G.bbox[1]);
-    var c = nearest(lon, lat);
+    var c = nearest(lon, lat), R = cellR(c);
     tip.style.display = "block";
     tip.style.left = (e.clientX - r.left) + "px";
     tip.style.top = (e.clientY - r.top) + "px";
     tip.innerHTML = "海拔 " + c.elev + " m · 坡度 " + c.slope + "° · 坡向 " + c.aspect + "°<br>" +
-      "霜冻易感 <b>" + c.frost_risk + "</b>（" + c.frost + "） · 高温/旱 <b>" + c.heat_risk + "</b>（" + c.heat + "）";
+      "综合风险 <b class='" + clsSpan(riskCls(R)) + "'>" + riskCls(R) + "</b>（R=" + (R == null ? "-" : R.toFixed(2)) + "）" +
+      (c.dtmin != null ? " · 下推 Tmin " + (SITE ? (SITE.tmin + c.dtmin).toFixed(1) : "-") + "℃" : "") + "<br>" +
+      "霜冻易感 <b>" + c.frost_risk + "</b> · 高温/旱 <b>" + c.heat_risk + "</b>";
   }
   map.addEventListener("mousemove", hover);
   map.addEventListener("mouseleave", function () { tip.style.display = "none"; });
+  map.addEventListener("click", function (e) {
+    if (!G) return;
+    var r = map.getBoundingClientRect();
+    var fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+    var lon = G.bbox[0] + fx * (G.bbox[2] - G.bbox[0]);
+    var lat = G.bbox[3] - fy * (G.bbox[3] - G.bbox[1]);
+    showPlot(lon, lat);
+  });
+
+  function showPlot(lon, lat) {
+    var box = $("#plotCard");
+    box.style.display = "block";
+    box.innerHTML = "正在生成该点数据…";
+    fetch("api/plot?lat=" + lat.toFixed(5) + "&lon=" + lon.toFixed(5), { cache: "no-store" })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        if (d.detail || d._http) { box.textContent = "该点不在梅家坞茶园 AOI 内，或服务暂不可用。"; return; }
+        function row(k, v) { return "<tr><td style='width:38%;color:var(--muted)'>" + k + "</td><td>" + v + "</td></tr>"; }
+        var h = '<div style="font-weight:600;margin-bottom:6px">该点自动生成数据' + (d.date ? "（" + d.date + "）" : "") + '</div><table><tbody>';
+        h += row("经纬", d.lon + ", " + d.lat);
+        h += row("海拔", d.elev_m + " m");
+        h += row("坡度 / 坡向", d.slope_deg + "° / " + d.aspect_deg + "°");
+        if (d.downscaled) h += row("下推 Tmin / Tmax", d.downscaled.tmin + " / " + d.downscaled.tmax + " ℃");
+        if (d.risk) h += row("综合风险 R", "<b class='" + clsSpan(d.risk.level) + "'>" + d.risk.R.toFixed(2) + "（" + d.risk.level + "）</b>");
+        h += row("霜冻易感", d.frost_susceptibility) + row("高温/旱易感", d.heat_susceptibility);
+        h += row("建议", d.advice || "-") + "</tbody></table>";
+        h += '<div style="margin-top:8px"><button id="askBtn">用问答追问这个地块 →</button></div>';
+        box.innerHTML = h;
+        $("#askBtn").onclick = function () {
+          location.href = "chat.html?q=" + encodeURIComponent(d.question || ("地块(" + d.lon + "," + d.lat + ")今天该做什么？"));
+        };
+      }).catch(function () { box.textContent = "生成失败，请稍后重试。"; });
+  }
 
   fetch("terrain_grid.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (g) {
     G = g;
     $("#method").textContent = g.method + "（分辨率≈" + g.res_m + " m/px）";
-    var tb = $("#top").querySelector("tbody");
-    (g.top_frost || []).forEach(function (c) {
-      tb.innerHTML += "<tr><td>" + c.lon + ", " + c.lat + "</td><td>" + c.elev + " m</td>" +
-        "<td class='" + clsSpan(c.frost_risk) + "'>" + c.frost_risk + "</td></tr>";
-    });
+    fetch("api/overview", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+      var fc = (d.days || []).filter(function (x) { return x.source === "forecast"; });
+      if (fc.length) { SITE = fc[0]; }
+      renderTop(); drawRisk();
+      $("#base").innerHTML = "站点基准（" + (SITE ? SITE.date : "-") + "）：R=" + (SITE ? SITE.risk_R : "-") +
+        "（" + (SITE ? SITE.risk_level : "-") + "）· Tmin " + (SITE ? SITE.tmin : "-") + "℃。地图为**地形下推后的相对差异**。";
+    }).catch(function () { renderTop(); drawRisk(); });
   }).catch(function () { $("#method").textContent = "地形数据未生成：请运行 python src/terrain_map.py"; });
 
-  fetch("api/overview", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
-    var cur = d && d.days ? d.days.filter(function (x) { return x.source === "forecast"; })[0] : null;
-    if (cur) {
-      $("#base").innerHTML = "站点预报基准：" + cur.date + " 复合风险 R=" + cur.risk_R + "（" + cur.risk_level +
-        "）。本地图显示的是**地形相对差异**（同一天气下哪里更易霜冻/高温）。";
-    }
-  }).catch(function () {});
+  function renderTop() {
+    var tb = $("#top").querySelector("tbody"); tb.innerHTML = "";
+    var arr = (G.cells || []).map(function (c) { return { c: c, R: cellR(c) }; })
+      .sort(function (a, b) { return (b.R || 0) - (a.R || 0); }).slice(0, 8);
+    arr.forEach(function (x) {
+      var c = x.c, cls = riskCls(x.R);
+      var tr = document.createElement("tr"); tr.className = "click";
+      tr.innerHTML = "<td>" + c.lon + ", " + c.lat + "</td><td>" + c.elev + " m</td><td>" +
+        (x.R == null ? "-" : x.R.toFixed(2)) + "</td><td class='" + clsSpan(cls) + "'>" + cls + "</td>";
+      tr.onclick = function () {
+        var q = "地块(" + c.lon + ", " + c.lat + "，海拔" + c.elev + "m)当前" + cls + "风险，今天该做什么？";
+        location.href = "chat.html?q=" + encodeURIComponent(q);
+      };
+      tb.appendChild(tr);
+    });
+  }
+  window.addEventListener("resize", drawRisk);
 })();
 </script>
 </body>

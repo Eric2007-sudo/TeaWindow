@@ -1423,6 +1423,61 @@ def terrain_api():
         return JSONResponse(json.load(f))
 
 
+@app.get("/api/plot")
+def plot_api(lat: float, lon: float):
+    """按经纬度自动生成"地块数据"：地形（海拔/坡度/坡向）+ 下推天气 + 风险 R + 建议问题。"""
+    p = os.path.join(WEB, "terrain_grid.json")
+    if not os.path.exists(p):
+        raise HTTPException(404, "terrain map not generated; run python src/terrain_map.py")
+    with open(p, encoding="utf-8") as f:
+        g = json.load(f)
+    bb = g.get("bbox") or [0, 0, 0, 0]
+    if not (bb[0] <= lon <= bb[2] and bb[1] <= lat <= bb[3]):
+        raise HTTPException(422, "out of AOI (Meijiawu tea area)")
+    best, bd = None, 1e9
+    for c in g.get("cells", []):
+        d = (c.get("lon", 0) - lon) ** 2 + (c.get("lat", 0) - lat) ** 2
+        if d < bd:
+            bd, best = d, c
+    if not best:
+        raise HTTPException(404, "no grid cells")
+    d = _load()
+    fc = [x for x in d.get("days", []) if x.get("source") == "forecast"]
+    day = fc[0] if fc else {}
+
+    def _cls(v):
+        return "极高" if v >= 0.75 else ("高" if v >= 0.6 else ("中" if v >= 0.4 else "低"))
+
+    out = {"lon": best.get("lon"), "lat": best.get("lat"),
+           "elev_m": best.get("elev"), "slope_deg": best.get("slope"), "aspect_deg": best.get("aspect"),
+           "frost_factor": best.get("frost"), "heat_factor": best.get("heat"),
+           "frost_susceptibility": best.get("frost_risk"), "heat_susceptibility": best.get("heat_risk"),
+           "date": day.get("date"), "site_R": day.get("risk_R")}
+    tmin, tmax = day.get("tmin"), day.get("tmax")
+    if tmin is not None and best.get("dtmin") is not None:
+        tmin_c = round(float(tmin) + float(best["dtmin"]), 1)
+        tmax_c = round(float(tmax or 30) + float(best.get("dtmax") or 0), 1)
+        fs = max(0.0, min(1.0, (2.0 - tmin_c) / 4.0))
+        hs = max(0.0, min(1.0, (tmax_c - 33.0) / 5.0))
+        ds = float(best.get("drought") or 0) * 0.6
+        R = max(fs, hs, ds)
+        lvl = _cls(R)
+        out["downscaled"] = {"tmin": tmin_c, "tmax": tmax_c}
+        out["risk"] = {"R": round(R, 2), "level": lvl,
+                       "frost_score": round(fs, 2), "heat_score": round(hs, 2), "drought_score": round(ds, 2)}
+        loc = f"地块({best.get('lon')}, {best.get('lat')}，海拔{best.get('elev')}m，坡度{best.get('slope')}°，坡向{best.get('aspect')}°)"
+        if fs >= 0.6 or (best.get("frost") or 0) >= 0.6:
+            out["question"] = f"{loc}霜冻易感{best.get('frost_risk')}（下推 Tmin {tmin_c}℃），要不要防冻？"
+        elif hs >= 0.6 or (best.get("heat") or 0) >= 0.6:
+            out["question"] = f"{loc}高温/旱易感{best.get('heat_risk')}（下推 Tmax {tmax_c}℃），要不要灌溉或遮阳？"
+        else:
+            out["question"] = f"{loc}当前风险{lvl}（R={round(R, 2)}），今天该做什么？"
+        out["advice"] = ("建议防冻：夜晨覆盖/熏烟/喷水" if fs >= 0.6 else
+                         "建议防高温/补水：遮阳、傍晚浇透" if hs >= 0.6 else
+                         "常规养护，关注最新预报")
+    return out
+
+
 @app.get("/api/forecast/compare")
 def forecast_compare(request: Request):
     """change-warning：本地快照 vs 上游最新逐日预报的差异（缓存 30 分钟）。"""

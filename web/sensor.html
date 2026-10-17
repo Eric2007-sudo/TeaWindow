@@ -13,6 +13,8 @@
   .wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
   h1{font-size:20px;margin:0 0 4px} h1 span{color:var(--accent)}
   .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+  .pill{display:inline-block;border:1px solid var(--line);background:#0f1a24;color:#bcd0de;border-radius:999px;padding:3px 10px;font-size:12px;margin:2px 4px 0 0;text-decoration:none}
+  .pill:hover{border-color:#1d4a6b;color:#fff}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
   label{display:block;font-size:13px;color:#cfe0ee;margin:8px 0 4px}
   input,select,textarea{width:100%;background:#0f1a24;border:1px solid var(--line);border-radius:8px;padding:10px;color:var(--fg);font-size:14px}
@@ -27,6 +29,7 @@
 <div class="wrap">
   <h1>梅坞采候 <span>TeaWindow</span> · 传感器接入</h1>
   <div class="sub">硬件/第三方可通过 <code>POST /api/sensor</code> 上报观测（需 <code>SENSOR_TOKEN</code>）。本页用于手动测试与实时查看。</div>
+  <div class="sub"><a class="pill" href="index.html">仪表盘</a><a class="pill" href="terrain.html">地块风险图</a><a class="pill" href="chat.html">智能问答</a><a class="pill" href="report.html">物候上报</a><a class="pill" href="links.html">扫码分享</a></div>
 
   <div class="card">
     <b>1) 手动上报（测试）</b>
