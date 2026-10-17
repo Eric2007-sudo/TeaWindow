@@ -167,6 +167,14 @@ def main():
 
     forecast_only = os.environ.get("TW_FETCH_FORECAST_ONLY") == "1"
     ap_ = os.path.join(RAW, "weather_archive.json")
+    _base = os.path.join(ROOT, "data", "archive_baseline.json")
+    if forecast_only and not os.path.exists(ap_) and os.path.exists(_base):
+        try:                                   # 轻量刷新：先由完整基线恢复，避免 archive 重试拖慢
+            import shutil
+            shutil.copyfile(_base, ap_)
+            print("[archive] 轻量刷新：从完整基线恢复历史（跳过网络）")
+        except Exception:  # noqa: BLE001
+            pass
     if forecast_only and os.path.exists(ap_):
         print("[archive] 轻量刷新：沿用已有历史（跳过 archive 抓取）")
         arc = {"daily": {"time": []}}
