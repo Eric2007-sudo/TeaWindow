@@ -1,7 +1,7 @@
 (function () {
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
-  var G = null, SITE = null, STATIONS = [], METRIC = "risk";
+  var G = null, SITE = null, STATIONS = [], METRIC = "risk", PARCELS = null, SHOW_PARCELS = true;
   var map = $("#map"), cv = $("#cv"), lyr = $("#lyr"), tip = $("#tip");
 
   function cls(v) { return v >= 0.75 ? "极高" : v >= 0.6 ? "高" : v >= 0.4 ? "中" : "低"; }
@@ -64,6 +64,31 @@
       ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
       ctx.fillStyle = "#4aa8ff"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = "#0b1219"; ctx.stroke();
     });
+    // 地块边界（OSM 参考）+ 地块名
+    if (SHOW_PARCELS && PARCELS) {
+      ctx.save();
+      ctx.setLineDash([5, 4]); ctx.lineWidth = 1.4; ctx.strokeStyle = "rgba(255,209,102,.95)";
+      (PARCELS.parcels || []).forEach(function (p) {
+        var r = p.ring || []; if (r.length < 4) return;
+        ctx.beginPath();
+        r.forEach(function (pt, i) {
+          var x = (pt[0] - G.bbox[0]) / (G.bbox[2] - G.bbox[0]) * W;
+          var y = (G.bbox[3] - pt[1]) / (G.bbox[3] - G.bbox[1]) * H;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+      ctx.font = "12px 'Microsoft YaHei',Segoe UI,sans-serif";
+      (PARCELS.plots || []).forEach(function (pl) {
+        var x = (pl.lon - G.bbox[0]) / (G.bbox[2] - G.bbox[0]) * W;
+        var y = (G.bbox[3] - pl.lat) / (G.bbox[3] - G.bbox[1]) * H;
+        if (x < 0 || x > W || y < 0 || y > H) return;
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(11,18,25,.9)"; ctx.strokeText(pl.name, x + 7, y - 6);
+        ctx.fillStyle = "#ffe9a8"; ctx.fillText(pl.name, x + 7, y - 6);
+      });
+      ctx.restore();
+    }
   }
   function renderTop() {
     var tb = $("#top").querySelector("tbody");
@@ -116,6 +141,10 @@
     fetch("api/sensors", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
       STATIONS = d.stations || []; renderStations(); render();
     }).catch(function () {});
+
+    fetch("terrain_parcels.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+      PARCELS = d; render();
+    }).catch(function () {});
   }
 
   function setMetric(m, btn) {
@@ -130,6 +159,7 @@
   $("#bHeat").onclick = function () { setMetric("heat", this); };
   $("#bDrought").onclick = function () { setMetric("drought", this); };
   $("#bHill").onclick = function () { setMetric("hill", this); };
+  $("#bParcel").onclick = function () { SHOW_PARCELS = !SHOW_PARCELS; this.classList.toggle("on", SHOW_PARCELS); render(); };
 
   map.addEventListener("mousemove", function (e) {
     if (!G) return;
