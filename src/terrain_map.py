@@ -95,6 +95,8 @@ def main():
     lons, lats = lons[ci[0]:ci[-1] + 1], lats[cj[0]:cj[-1] + 1]
     H, W = elev.shape
     res_m = 40075016.686 * math.cos(math.radians(30.215)) / (2 ** z) / 256.0
+    if np.isnan(elev).any():                                  # 个别瓦片缺失：用整体均值填补
+        elev = np.where(np.isnan(elev), float(np.nanmean(elev)), elev)
     print(f"AOI grid {H}x{W}, 分辨率≈{res_m:.1f} m/px, 高程 {elev.min():.0f}~{elev.max():.0f} m")
 
     sh, slope, aspect = hillshade(elev, res_m)
@@ -107,18 +109,45 @@ def main():
     # 高温/旱：低海拔+南西向+缓坡（日照强）
     heat = np.clip(0.45 * (1 - e_norm) + 0.35 * south + 0.20 * gentle, 0, 1)
 
-    # 山体阴影底图
-    base = (0.35 + 0.65 * sh)
-    hs = np.dstack([base * 0.90, base * 0.95, base]).clip(0, 1)
-    Image.fromarray((hs * 255).astype(np.uint8)).save(os.path.join(WEB, "terrain_hillshade.png"))
+    # 山体阴影底图：多方向光照 + 对比拉伸，地形更清楚
+    sh, slope, aspect = hillshade(elev, res_m, az=315.0)
+    sh2, _, _ = hillshade(elev, res_m, az=135.0)
+    sh = 0.6 * sh + 0.4 * sh2
+    lo, hi = np.percentile(sh, 2), np.percentile(sh, 98)
+    sh = np.clip((sh - lo) / (hi - lo + 1e-9), 0, 1)
+    sh = np.power(sh, 0.85)                                  # 提亮暗部、增强层次
+    # 等高线（每 20 m 一条，细、淡）
+    band = (np.floor(elev / 20.0).astype(int) % 2 == 0)
+    band2 = (np.floor(elev / 100.0).astype(int) % 2 == 0)
+    base = (0.16 + 0.84 * sh) * np.where(band, 0.94, 1.0) * np.where(band2, 0.96, 1.0)
+    hs = np.dstack([base * 0.92, base * 0.97, base]).clip(0, 1)
+    img = Image.fromarray((hs * 255).astype(np.uint8))
+    try:                                                     # 轻微锐化，边缘更清晰
+        from PIL import ImageFilter
+        img = img.filter(ImageFilter.UnsharpMask(radius=1.6, percent=120, threshold=2))
+    except Exception:  # noqa: BLE001
+        pass
+    # 比例尺 + 指北针
+    from PIL import ImageDraw
+    dr = ImageDraw.Draw(img)
+    Wpx, Hpx = img.size
+    bar_m = 200.0
+    bar_px = int(bar_m / res_m)
+    x0, y0 = 18, Hpx - 26
+    dr.rectangle([x0 - 6, y0 - 16, x0 + bar_px + 8, y0 + 6], fill=(11, 18, 25))
+    dr.line([x0, y0, x0 + bar_px, y0], fill=(255, 255, 255), width=3)
+    dr.text((x0, y0 - 14), "200 m", fill=(255, 255, 255))
+    dr.polygon([(Wpx - 30, 34), (Wpx - 38, 60), (Wpx - 22, 60)], fill=(255, 255, 255))
+    dr.text((Wpx - 40, 62), "N", fill=(255, 255, 255))
+    img.save(os.path.join(WEB, "terrain_hillshade.png"))
 
     def overlay(v):
-        # 绿(低)→黄(中)→红(高)
+        # 绿(低)→黄(中)→红(高)，叠加更透（保留地形细节）
         r = np.clip((v - 0.5) * 2.0, 0, 1)
         g = np.clip(1.0 - np.abs(v - 0.5) * 2.0, 0, 1)
         b = np.clip((0.5 - v) * 2.0, 0, 1)
-        img = np.dstack([hs * (1 - 0.55) + 0.55 * np.dstack([r, g, b])]).clip(0, 1)
-        return (img * 255).astype(np.uint8)
+        img2 = np.dstack([hs * (1 - 0.48) + 0.48 * np.dstack([r, g, b])]).clip(0, 1)
+        return (img2 * 255).astype(np.uint8)
 
     Image.fromarray(overlay(frost)).save(os.path.join(WEB, "terrain_frost.png"))
     Image.fromarray(overlay(heat)).save(os.path.join(WEB, "terrain_heat.png"))
