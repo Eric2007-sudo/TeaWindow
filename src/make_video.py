@@ -16,8 +16,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
 OUT = os.path.join(ROOT, "submit", "演示视频_自动播放.mp4")
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-N_SLIDES = 15
-SECS_PER_SLIDE = 10
+N_SLIDES = 21
+SECS_PER_SLIDE = 8
 FPS = 1
 
 
