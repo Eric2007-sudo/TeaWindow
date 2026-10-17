@@ -729,7 +729,7 @@ def _answer_impl(question, context=None, history=None, state=None):
                 return {"engine": "teawindow-own", "mode": "rules", "intent": "day_action", "confidence": 0.7,
                         "backend": intent_backend(), "retrieval": retrieval_backend(), "slots": {}, "detail": False,
                         "follow_up": True, "text": _nlg.day_advice(dd, season.is_off()),
-                        "chain": ["指代: 上一目标日 " + carry]}
+                        "chain": ["指代: 上一目标日 " + carry], "state": {"active_date": carry}}
             except Exception:  # noqa: BLE001
                 pass
 

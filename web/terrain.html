@@ -98,7 +98,8 @@
   function drawRisk() {
     if (!G) return;
     var img = map.querySelector("img.ph");
-    var W = img.clientWidth, H = img.clientHeight;
+    var W = (img && img.clientWidth) || map.clientWidth, H = (img && img.clientHeight) || map.clientHeight;
+    if (!W || !H) return;   // 布局未完成，等 load/resize 再画
     cv.width = W; cv.height = H;
     var ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, W, H);
@@ -219,6 +220,10 @@
   fetch("terrain_grid.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (g) {
     G = g;
     $("#method").textContent = g.method + "（分辨率≈" + g.res_m + " m/px）";
+    renderTop(); drawRisk();   // 先按内嵌 R 画一版（不依赖 image/网络）
+    var _img = map.querySelector("img.ph");
+    if (_img) { _img.addEventListener("load", function () { drawRisk(); }); if (_img.complete) drawRisk(); }
+    window.addEventListener("load", function () { drawRisk(); renderTop(); });
     function refreshData() {
     fetch("api/overview", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
       var fc = (d.days || []).filter(function (x) { return x.source === "forecast"; });
