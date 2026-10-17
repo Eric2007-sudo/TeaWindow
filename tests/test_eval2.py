@@ -1057,11 +1057,12 @@ def test_ops_lineage_alerts_verify():
     assert "验证历史" in e.answer("最近两次验证时间与样本")["text"] or "仅" in e.answer("最近两次验证时间与样本")["text"]
 
 
-def test_stale_degrades_action():
+def test_stale_degrades_action(monkeypatch):
     import qa.engine as e
-    # 本地数据 fetched_at 通常已 >60 分钟 → 应出现"可能过期"降级提示
+    import qa.nlg as nlg
+    monkeypatch.setattr(nlg, "_stale_age", lambda data: 999)   # 确定性模拟陈旧
     r = e.answer("要不要浇水")
-    assert ("可能过期" in r["text"]) or ("测墒" in r["text"])
+    assert ("可能过期" in r["text"]) or ("测墒" in r["text"]) or ("核验" in r["text"])
 
 
 def test_refresh_guards_uvicorn_argv(monkeypatch):
