@@ -106,7 +106,7 @@
       SITE = fc.length ? fc[0] : null;
       $("#base").innerHTML = "站点基准（" + (SITE ? SITE.date : "-") + "）：R=" + (SITE ? SITE.risk_R : "-") +
         "（" + (SITE ? SITE.risk_level : "-") + "）· Tmin " + (SITE ? SITE.tmin : "-") + "℃ · 更新 " +
-        (d.updated || "-") + "（每 60 秒自动刷新）";
+        ((d.meta && d.meta.updated) || d.updated || "-") + "（每 60 秒自动刷新）";
       render();
     }).catch(function () {
       $("#base").textContent = "未能读取实时预报（显示网格内置 R）。";
