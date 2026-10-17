@@ -481,7 +481,7 @@ def ops(ctx, q, detail):
     if any(k in q for k in ["刷新", "更新", "多久", "过期", "数据年龄", "stale", "及时", "实时性", "新鲜"]):
         stale = (age is not None and age > int(__import__("os").environ.get("STALE_MINUTES", "120")))
         text = (f"数据抓取时间 {fetched}（约 {age} 分钟前）；刷新状态 {rs.get('status', 'unknown')}"
-                f"（上次成功 {rs.get('last_success') or '—'}）。服务约每 15 分钟自动刷新，另每日 06:00 全量刷新（上游预报逐小时更新）。")
+                f"（上次成功 {rs.get('last_success') or '—'}）。有访问时自动保持新鲜（后台尽力每 15 分钟；免费层可能休眠/节流；上游预报逐小时更新）。")
         text += " 当前数据可能已过期，请以最新预报与官方预警为准。" if stale else " 数据在新鲜窗口内。"
         text += f" 线上数据版本 v{v.get('id')}（构建 {v.get('build') or '—'}，上游 {v.get('upstream_url') or '—'}）。"
         return text, ["运行: refresh_state / data_versions", "口径: 数据抓取时间≠业务日"]
