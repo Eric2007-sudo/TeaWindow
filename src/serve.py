@@ -1545,6 +1545,29 @@ def plot_api(lat: float, lon: float):
     return out
 
 
+@app.get("/api/plot/series")
+def plot_series_api(lat: float, lon: float, n: int = 3, scope: str = "next"):
+    """地块多日时序（下推）：供"地块体检卡"使用。"""
+    try:
+        from qa import plotctx
+    except Exception:  # noqa: BLE001
+        raise HTTPException(500, "qa module unavailable")
+    d = _load()
+    ctx = plotctx.lookup(lon, lat, d)
+    if not ctx:
+        raise HTTPException(404, "terrain map not generated; run python src/terrain_map.py")
+    if ctx.get("out_of_aoi"):
+        raise HTTPException(422, "out of AOI (Meijiawu tea area)")
+    ser = plotctx.series(lon, lat, d, n=max(1, min(int(n), 7)), scope=("past" if scope == "past" else "next"))
+    v = (store.list_versions(1) or [{}])[0]
+    fr = _freshness(d)
+    return {"plot": ctx, "series": ser, "scope": scope,
+            "meta": {"fetched_at": (d.get("meta") or {}).get("fetched_at"),
+                     "stale": fr.get("stale"), "age_minutes": fr.get("age_minutes"),
+                     "version": v.get("id"), "upstream": v.get("upstream_url"),
+                     "sha": (v.get("raw_sha256_full") or "")[:16], "build": v.get("build")}}
+
+
 @app.get("/api/forecast/compare")
 def forecast_compare(request: Request):
     """change-warning：本地快照 vs 上游最新逐日预报的差异（缓存 30 分钟）。"""

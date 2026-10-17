@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeaWindow · 地块体检卡</title>
+<style>
+  :root{--bg:#0b1219;--panel:#16212b;--fg:#e8eef3;--muted:#8aa0b2;--line:#243444;--accent:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:22px 18px 60px}
+  h1{font-size:22px;margin:0 0 4px} h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  button{font:inherit;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:#0f1a24;color:var(--fg);cursor:pointer}
+  button.p{background:#12324a;border-color:#1d4a6b}
+  a{color:var(--accent);text-decoration:none}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .kpi{background:#0f1a24;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .kpi .k{color:var(--muted);font-size:12px}
+  .kpi .v{font-size:20px;font-weight:700;margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+  .hi{color:#e5534b} .mid{color:#d6b657} .lo{color:#3fb950}
+  .small{color:var(--muted);font-size:12px;line-height:1.6}
+  .adv{background:#0f1a24;border-left:3px solid var(--accent);padding:10px 12px;border-radius:8px;margin-top:10px}
+  @media print{
+    body{background:#fff;color:#111}
+    .wrap{padding:0;max-width:none}
+    .bar,.noprint{display:none!important}
+    .card{background:#fff;border:1px solid #ccc}
+    .kpi{background:#fff;border:1px solid #ddd}
+    .sub,.small,.kpi .k,th{color:#555}
+    .adv{background:#f5f5f5;border-left:3px solid #333}
+    .hi{color:#b00020} .mid{color:#8a6d00} .lo{color:#0a7d2c}
+    a{color:#111;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>梅坞采候 <span>TeaWindow</span> · 地块体检卡</h1>
+  <div class="sub" id="sub">加载中…</div>
+  <div class="bar noprint">
+    <button class="p" id="print">打印 / 存 PDF</button>
+    <a href="terrain.html">← 地块风险图</a>
+    <a href="chat.html">智能问答</a>
+  </div>
+
+  <div class="card">
+    <div class="kpis" id="kpis"></div>
+    <div class="adv" id="advice">加载中…</div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:6px" id="serTitle">逐日下推（未来 3 天）</div>
+    <table id="ser"><thead><tr><th>日期</th><th>Tmin</th><th>Tmax</th><th>降雨</th><th>风险 R</th><th>等级</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:6px">数据来源与可追溯性</div>
+    <div class="small" id="prov"></div>
+    <div class="small" style="margin-top:8px">本卡为<b>决策辅助</b>，地形风险为 DEM 下推的<b>相对差异</b>；请结合田间实勘与官方预警。</div>
+  </div>
+</div>
+<script src="plot_report.js"></script>
+</body>
+</html>

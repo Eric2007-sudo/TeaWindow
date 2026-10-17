@@ -851,6 +851,14 @@ def test_plot_series_multiday():
     assert any("地块上下文" in str(c) for c in r.get("chain") or [])
 
 
+def test_plot_series_api():
+    c = _client()
+    r = c.get("/api/plot/series?lat=30.2215&lon=120.1000&n=3")
+    assert r.status_code == 200
+    d = r.json()
+    assert d.get("series") and "meta" in d and d["plot"].get("elev_m")
+
+
 def test_qa_review_requires_admin(monkeypatch):
     import serve
     monkeypatch.setattr(serve, "ADMIN_TOKEN", "adm")

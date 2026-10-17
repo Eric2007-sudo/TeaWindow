@@ -188,9 +188,10 @@
         (d.risk ? row("综合风险 R", "<b class='" + clsSpan(d.risk.level) + "'>" + d.risk.R + "（" + d.risk.level + "）</b>") : "") +
         row("霜冻易感", d.frost_susceptibility) + row("高温/旱易感", d.heat_susceptibility) +
         row("建议", d.advice || "-") + "</tbody></table>" +
-        '<div style="margin-top:8px"><button id="askBtn">用问答追问这个地块 →</button></div>';
+        '<div style="margin-top:8px"><button id="askBtn">用问答追问这个地块 →</button> <button id="repBtn">地块体检卡 →</button></div>';
       box.innerHTML = h;
       $("#askBtn").onclick = function () { location.href = "chat.html?q=" + encodeURIComponent(d.question || ("地块(" + d.lon + "," + d.lat + ")今天该做什么？")); };
+      $("#repBtn").onclick = function () { location.href = "plot_report.html?lat=" + d.lat + "&lon=" + d.lon; };
     }).catch(function () { box.textContent = "生成失败，请稍后重试。"; });
   });
 
