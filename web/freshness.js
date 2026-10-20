@@ -1,8 +1,12 @@
-/* 实时新鲜度徽标：读 /api/ready；过期(>25min)自动触发"按需刷新"，刷新中显示进度，完成后自动重载一次 */
+﻿/* 实时新鲜度徽标：读 /api/ready；过期(>25min)自动触发"按需刷新"，刷新中显示进度，完成后自动重载一次 */
 (function () {
   var el = document.getElementById("freshness");
   if (!el) return;
   var lastAsk = 0, timer = null, reloaded = false;
+
+  function sget(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+  function sset(k, v) { try { sessionStorage.setItem(k, v); } catch (e) { /* ignore */ } }
+  function sdel(k) { try { sessionStorage.removeItem(k); } catch (e) { /* ignore */ } }
 
   function paint(age, stale, running) {
     var a = (age == null ? "-" : Math.round(age));
@@ -32,7 +36,7 @@
       if (running) { schedule(10000); return; }
 
       if (stale) {
-        sessionStorage.setItem("tw_was_stale", "1");
+        sset("tw_was_stale", "1");
         if (Date.now() - lastAsk > 5 * 60 * 1000) {
           lastAsk = Date.now();
           fetch("api/refresh/auto", { method: "POST" }).catch(function () {});
@@ -43,9 +47,9 @@
       }
 
       /* 打开时是过期数据、现在已刷新完成 → 自动重载一次，让图表用上新数据 */
-      if (!reloaded && age != null && age < 10 && sessionStorage.getItem("tw_was_stale") === "1") {
+      if (!reloaded && age != null && age < 10 && sget("tw_was_stale") === "1") {
         reloaded = true;
-        sessionStorage.removeItem("tw_was_stale");
+        sdel("tw_was_stale");
         location.reload();
         return;
       }
