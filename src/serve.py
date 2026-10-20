@@ -351,6 +351,10 @@ def _refresh(do_fetch=True, light=True):
     if not _refresh_lock.acquire(blocking=False):
         return {"status": "busy"}
     t0 = _time.time()
+    try:
+        store.set_refresh_state("running", 0, next_planned="")
+    except Exception:  # noqa: BLE001
+        pass
     _saved_argv = sys.argv
     sys.argv = ["pipeline"]   # 避免 uvicorn 命令行参数污染下游模块（如 fetch_weather 读 argv 当日期）
     if light and do_fetch:

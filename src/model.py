@@ -70,22 +70,33 @@ def rubric(df):
 
 # ---------------------------------------------------------------- GBDT
 def _best_split(X, g, h, min_leaf=20, n_cand=24):
+    # 排序一次 + 前缀和 + 向量化候选阈值（与逐个阈值扫描结果完全等价，但快 ~5-10 倍）
     n, p = X.shape
-    base = (g.sum() ** 2) / (h.sum() + 1e-9)
+    G, H = g.sum(), h.sum()
+    base = (G * G) / (H + 1e-9)
     best = (-1.0, None, None)
+    pos = np.linspace(0.05, 0.95, n_cand) * (n - 1)
+    ar = np.arange(n)
     for j in range(p):
         col = X[:, j]
-        qs = np.unique(np.quantile(col, np.linspace(0.05, 0.95, n_cand)))
-        for t in qs:
-            left = col <= t
-            nl = left.sum()
-            if nl < min_leaf or (n - nl) < min_leaf:
-                continue
-            gl, hl = g[left].sum(), h[left].sum()
-            gr, hr = g[~left].sum(), h[~left].sum()
-            gain = gl * gl / (hl + 1e-9) + gr * gr / (hr + 1e-9) - base
-            if gain > best[0]:
-                best = (gain, j, t)
+        order = np.argsort(col, kind="mergesort")
+        cs = col[order]
+        qs = np.unique(np.interp(pos, ar, cs))       # 等价于 np.quantile(col, 0.05..0.95)
+        if not len(qs):
+            continue
+        cg = np.cumsum(g[order])
+        ch = np.cumsum(h[order])
+        nl = np.searchsorted(cs, qs, side="right")   # 左侧样本数（col <= t）
+        ok = (nl >= min_leaf) & ((n - nl) >= min_leaf)
+        if not ok.any():
+            continue
+        nl, qs_v = nl[ok], qs[ok]
+        gl, hl = cg[nl - 1], ch[nl - 1]
+        gr, hr = G - gl, H - hl
+        gains = gl * gl / (hl + 1e-9) + gr * gr / (hr + 1e-9) - base
+        k = int(np.argmax(gains))
+        if gains[k] > best[0]:
+            best = (float(gains[k]), j, float(qs_v[k]))
     return best[1], best[2]
 
 
@@ -102,11 +113,16 @@ def _build(X, g, h, depth, max_depth, min_leaf):
 
 
 def _apply(tree, X, out, idx):
-    for i in idx:
-        node = tree
-        while "leaf" not in node:
-            node = node["left"] if X[i, node["feature"]] <= node["threshold"] else node["right"]
-        out[i] += node["leaf"]
+    # 递归按索引切分（深度 ≤3），避免逐样本 Python 循环
+    idx = np.asarray(idx)
+    if idx.size == 0:
+        return
+    if "leaf" in tree:
+        out[idx] += tree["leaf"]
+        return
+    m = X[idx, tree["feature"]] <= tree["threshold"]
+    _apply(tree["left"], X, out, idx[m])
+    _apply(tree["right"], X, out, idx[~m])
 
 
 class GBDT:
