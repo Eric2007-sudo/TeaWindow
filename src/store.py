@@ -549,21 +549,37 @@ def qa_log_add(anon, question, intent, answer, engine, lang="", chain=None, evid
     try:
         import json as _json
         chain_s = _json.dumps(chain or [], ensure_ascii=False) if not isinstance(chain, str) else chain
+        base = (datetime_now(), anon, lang, str(question)[:500], str(intent)[:40],
+                str(answer)[:800], str(engine)[:40], 0)
         with _LOCK:
             c = _db()
-            c.execute("INSERT INTO qa_logs(ts,anon,lang,question,intent,answer,engine,relevant,reviewed,chain,evidence) VALUES(?,?,?,?,?,?,?,?,0,?,?)",
-                      (datetime_now(), anon, lang, str(question)[:500], str(intent)[:40],
-                       str(answer)[:800], str(engine)[:40], 0, str(chain_s)[:1000], str(evidence or "")[:2000]))
+            try:
+                c.execute("INSERT INTO qa_logs(ts,anon,lang,question,intent,answer,engine,relevant,reviewed,chain,evidence) "
+                          "VALUES(?,?,?,?,?,?,?,?,0,?,?)",
+                          base + (str(chain_s)[:1000], str(evidence or "")[:2000]))
+            except Exception as e:  # noqa: BLE001
+                # 旧库没有 chain/evidence 列时，退化为旧字段，保证问答日志不中断
+                _safe_rollback()
+                print("[store] qa_log_add 带证据列失败，回退旧列:", repr(e)[:160])
+                c.execute("INSERT INTO qa_logs(ts,anon,lang,question,intent,answer,engine,relevant,reviewed) "
+                          "VALUES(?,?,?,?,?,?,?,?,0)", base)
             c.commit()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        print("[store] qa_log_add 失败:", repr(e)[:160])
 
 
 def qa_log_pending(limit=200):
+    n = max(1, min(limit, 2000))
     with _LOCK:
-        rows = _db().execute("SELECT id,ts,anon,lang,question,intent,answer,engine,chain,evidence FROM qa_logs WHERE reviewed=0 ORDER BY id DESC LIMIT ?",
-                             (max(1, min(limit, 2000)),)).fetchall()
-    keys = ("id", "ts", "anon", "lang", "question", "intent", "answer", "engine", "chain", "evidence")
+        try:
+            rows = _db().execute("SELECT id,ts,anon,lang,question,intent,answer,engine,chain,evidence "
+                                 "FROM qa_logs WHERE reviewed=0 ORDER BY id DESC LIMIT ?", (n,)).fetchall()
+            keys = ("id", "ts", "anon", "lang", "question", "intent", "answer", "engine", "chain", "evidence")
+        except Exception:  # noqa: BLE001
+            _safe_rollback()      # 旧库没有 chain/evidence 列
+            rows = _db().execute("SELECT id,ts,anon,lang,question,intent,answer,engine "
+                                 "FROM qa_logs WHERE reviewed=0 ORDER BY id DESC LIMIT ?", (n,)).fetchall()
+            keys = ("id", "ts", "anon", "lang", "question", "intent", "answer", "engine")
     out = []
     for r in rows:
         d = dict(zip(keys, r))
@@ -572,6 +588,7 @@ def qa_log_pending(limit=200):
             d["chain"] = _json.loads(d["chain"]) if d.get("chain") else []
         except Exception:  # noqa: BLE001
             d["chain"] = []
+        d.setdefault("evidence", "")
         out.append(d)
     return out
 
