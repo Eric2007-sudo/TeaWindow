@@ -116,7 +116,7 @@ def _ddl():
         f"CREATE TABLE IF NOT EXISTS alert_deliveries(id {ai}, ts TEXT, new_codes TEXT, ok INTEGER, detail TEXT)",
         "CREATE TABLE IF NOT EXISTS data_json(k TEXT PRIMARY KEY, ts TEXT, blob TEXT)",
         "CREATE TABLE IF NOT EXISTS raw_cache(k TEXT PRIMARY KEY, ts TEXT, blob TEXT)",
-        f"CREATE TABLE IF NOT EXISTS qa_logs(id {ai}, ts TEXT, anon TEXT, lang TEXT, question TEXT, intent TEXT, answer TEXT, engine TEXT, relevant INTEGER, teacher TEXT, teacher_model TEXT, reviewed INTEGER DEFAULT 0)",
+        f"CREATE TABLE IF NOT EXISTS qa_logs(id {ai}, ts TEXT, anon TEXT, lang TEXT, question TEXT, intent TEXT, answer TEXT, engine TEXT, relevant INTEGER, teacher TEXT, teacher_model TEXT, reviewed INTEGER DEFAULT 0, chain TEXT, evidence TEXT)",
         "CREATE TABLE IF NOT EXISTS stations(station_id TEXT PRIMARY KEY, name TEXT, lat REAL, lon REAL, plot TEXT, ts TEXT)",
     ]
 
@@ -156,6 +156,13 @@ def _db():
                 _conn.commit()
             except Exception:  # noqa: BLE001
                 _safe_rollback()   # 列已存在时 Postgres 会中断事务，必须回滚
+        # 问答日志：补记来源链与证据快照（审计用；旧库自动迁移）
+        for col in ("chain", "evidence"):
+            try:
+                _conn.execute(f"ALTER TABLE qa_logs ADD COLUMN {col} TEXT")
+                _conn.commit()
+            except Exception:  # noqa: BLE001
+                _safe_rollback()
     return _conn
 
 
@@ -538,13 +545,15 @@ def get_raw(k):
 
 
 # ---------------- 匿名问答日志（用于"使用→教师纠偏→回训"，不含 IP/身份） ----------------
-def qa_log_add(anon, question, intent, answer, engine, lang=""):
+def qa_log_add(anon, question, intent, answer, engine, lang="", chain=None, evidence=""):
     try:
+        import json as _json
+        chain_s = _json.dumps(chain or [], ensure_ascii=False) if not isinstance(chain, str) else chain
         with _LOCK:
             c = _db()
-            c.execute("INSERT INTO qa_logs(ts,anon,lang,question,intent,answer,engine,relevant,reviewed) VALUES(?,?,?,?,?,?,?,?,0)",
+            c.execute("INSERT INTO qa_logs(ts,anon,lang,question,intent,answer,engine,relevant,reviewed,chain,evidence) VALUES(?,?,?,?,?,?,?,?,0,?,?)",
                       (datetime_now(), anon, lang, str(question)[:500], str(intent)[:40],
-                       str(answer)[:800], str(engine)[:40], 0))
+                       str(answer)[:800], str(engine)[:40], 0, str(chain_s)[:1000], str(evidence or "")[:2000]))
             c.commit()
     except Exception:  # noqa: BLE001
         pass
@@ -552,10 +561,19 @@ def qa_log_add(anon, question, intent, answer, engine, lang=""):
 
 def qa_log_pending(limit=200):
     with _LOCK:
-        rows = _db().execute("SELECT id,ts,anon,lang,question,intent,answer,engine FROM qa_logs WHERE reviewed=0 ORDER BY id DESC LIMIT ?",
+        rows = _db().execute("SELECT id,ts,anon,lang,question,intent,answer,engine,chain,evidence FROM qa_logs WHERE reviewed=0 ORDER BY id DESC LIMIT ?",
                              (max(1, min(limit, 2000)),)).fetchall()
-    keys = ("id", "ts", "anon", "lang", "question", "intent", "answer", "engine")
-    return [dict(zip(keys, r)) for r in rows]
+    keys = ("id", "ts", "anon", "lang", "question", "intent", "answer", "engine", "chain", "evidence")
+    out = []
+    for r in rows:
+        d = dict(zip(keys, r))
+        try:
+            import json as _json
+            d["chain"] = _json.loads(d["chain"]) if d.get("chain") else []
+        except Exception:  # noqa: BLE001
+            d["chain"] = []
+        out.append(d)
+    return out
 
 
 def qa_log_set(id_, teacher=None, teacher_model=None, relevant=None, reviewed=1):

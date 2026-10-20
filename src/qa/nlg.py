@@ -49,13 +49,8 @@ def _cn2num(s):
 
 
 def _parse_abs_date(q):
-    """解析绝对日期：2026年10月20日 / 十月二十号 / 2026-10-20 / 10-20（补当前年）。"""
-    m = re.search(r"([一二三四五六七八九十]{1,3})\s*月\s*([一二三四五六七八九十]{1,3})\s*[日号]", q)
-    if m:
-        try:
-            return datetime.date(season.today().year, _cn2num(m.group(1)), _cn2num(m.group(2)))
-        except ValueError:
-            return None
+    """解析绝对日期：2026年10月20日 / 十月二十号 / 十月27号（混合写法）/ 2026-10-20 / 10-20。"""
+    # 先解析"带年份"的写法，否则 2001年3月1日 会被 3月1日 规则截成今年
     for pat in (r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?",
                 r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})"):
         m = re.search(pat, q)
@@ -64,6 +59,12 @@ def _parse_abs_date(q):
                 return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
             except ValueError:
                 return None
+    m = re.search(r"([一二三四五六七八九十]{1,3}|\d{1,2})\s*月\s*([一二三四五六七八九十]{1,3}|\d{1,2})\s*[日号]", q)
+    if m:
+        try:
+            return datetime.date(season.today().year, _cn2num(m.group(1)), _cn2num(m.group(2)))
+        except ValueError:
+            return None
     for pat in (r"(\d{1,2})\s*月\s*(\d{1,2})\s*日?", r"(?<!\d)(\d{1,2})[-/](\d{1,2})(?!\d)"):
         m = re.search(pat, q)
         if m:
@@ -94,31 +95,35 @@ def _day_offset(q):
     return None
 
 
+def _find_day(ctx, iso):
+    """按日期取行：先未来预报、再历史，最后回退到全部行。
+    回退很有必要：凌晨跨日时，昨天的预报行仍在数据里（source=forecast 但 date<today），
+    若只查 fc/hist 会误答"无逐日数据"。"""
+    for key in ("fc", "hist"):
+        for d in ctx.get(key) or []:
+            if d["date"] == iso:
+                return d
+    for d in (ctx.get("data") or {}).get("days") or []:
+        if d["date"] == iso:
+            return d
+    return None
+
+
 def _focus_day(ctx, q):
     """返回 (day, label)。支持相对日期、绝对日期、历史日期。"""
     ad = _parse_abs_date(q)
     if ad is not None:
         iso = ad.isoformat()
-        for d in ctx["fc"]:
-            if d["date"] == iso:
-                return d, iso
-        for d in ctx["hist"]:
-            if d["date"] == iso:
-                return d, iso
-        return None, iso  # 超出数据范围
+        d = _find_day(ctx, iso)
+        return (d, iso) if d is not None else (None, iso)  # 超出数据范围
     off = _day_offset(q)
     if off is None:
         return None, None
     if isinstance(off, float):
         off = int(round(off))
     target = (season.today() + datetime.timedelta(days=off)).isoformat()
-    for d in ctx["fc"]:
-        if d["date"] == target:
-            return d, off
-    for d in ctx["hist"]:
-        if d["date"] == target:
-            return d, off
-    return None, off
+    d = _find_day(ctx, target)
+    return (d, off) if d is not None else (None, off)
 
 
 def _day_label(off):
@@ -732,6 +737,8 @@ def day_detail(ctx, q, detail):
     parts.append(f"风险 {d.get('risk_level')}（R={d.get('risk_R')}）")
     parts.append(f"适宜度 {int(d.get('suitability') or 0)}")
     text = f"{lab}：" + "，".join(parts) + "。"
+    if d["date"] < season.iso_today():
+        text += "（该日早于今天：所用为当日预报，不是实测。）"
     if d.get("tmin_lo") is not None:
         text += f" 集合区间：Tmin {d['tmin_lo']}–{d['tmin_hi']}℃、Tmax {d['tmax_lo']}–{d['tmax_hi']}℃。"
     if season.is_off():
@@ -801,14 +808,20 @@ def _date_refs(q):
     """按出现顺序返回日期引用：[('abs', date) | ('rel', offset)]，最长词优先、去重叠。"""
     q = q or ""
     refs = []
+    for m in re.finditer(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?", q):
+        try:
+            refs.append((m.start(), "abs", datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))))
+        except ValueError:
+            pass
     for m in re.finditer(r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})", q):
         try:
             refs.append((m.start(), "abs", datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))))
         except ValueError:
             pass
-    for m in re.finditer(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?", q):
+    for m in re.finditer(r"([一二三四五六七八九十]{1,3}|\d{1,2})\s*月\s*([一二三四五六七八九十]{1,3}|\d{1,2})\s*[日号]?", q):
         try:
-            refs.append((m.start(), "abs", datetime.date(season.today().year, int(m.group(1)), int(m.group(2)))))
+            refs.append((m.start(), "abs",
+                         datetime.date(season.today().year, _cn2num(m.group(1)), _cn2num(m.group(2)))))
         except ValueError:
             pass
     spans = []
@@ -842,8 +855,7 @@ def target_days(ctx, q):
             order.append(iso)
     days = []
     for iso in order:
-        d = next((x for x in ctx["fc"] if x["date"] == iso), None) or \
-            next((x for x in ctx["hist"] if x["date"] == iso), None)
+        d = _find_day(ctx, iso)
         if d is not None:
             days.append(d)
     return days
@@ -954,6 +966,8 @@ def compose(intent, q, sl, data):
             lab = _dlab(off, fd["date"])
             text = f"{lab}：风险 {fd['risk_level']}（R={fd['risk_R']}，适宜度 {int(fd.get('suitability') or 0)}）。" + \
                    ("主要风险：" + "、".join(dom) + "。" if dom else "无明显主导风险。")
+            if fd["date"] < season.iso_today():
+                text += "（该日早于今天：所用为当日预报，不是实测。）"
             if _season() == "off":
                 text += " " + season.care_hint()
             if detail:

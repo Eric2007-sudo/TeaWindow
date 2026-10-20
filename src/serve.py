@@ -732,6 +732,41 @@ def _ask(q, engine, history=None, state=None):
     return base
 
 
+def _evidence_for_answer(text, max_days=6, max_chars=1600):
+    """答案里出现的日期 → 反查当天数据行，生成可审计的证据快照。
+    用于 /qa_review.html 与 jev 复核：先看"答案说了什么"，再看"数据里到底是什么"。"""
+    import re
+    try:
+        d = _load()
+    except Exception:  # noqa: BLE001
+        return ""
+    rows = d.get("days") or []
+    if not rows:
+        return ""
+    by_date = {str(r.get("date")): r for r in rows}
+    tail = {}
+    for ds, r in by_date.items():
+        tail.setdefault(ds[-5:], []).append(ds)     # MM-DD → 候选（跨年时取最后一年）
+    picked, seen = [], set()
+    for m in re.finditer(r"(20\d{2}-\d{2}-\d{2})|(?<!\d)(\d{2}-\d{2})(?!\d)", text or ""):
+        ds = m.group(1)
+        if not ds:
+            cand = sorted(tail.get(m.group(2)) or [])
+            ds = cand[-1] if cand else None
+        if not ds or ds in seen or ds not in by_date:
+            continue
+        seen.add(ds)
+        r = by_date[ds]
+        adv = (r.get("advice") or "").split("（决策辅助")[0].strip()
+        picked.append("%s Tmin=%s Tmax=%s precip=%s R=%s 等级=%s | %s" % (
+            ds, r.get("tmin"), r.get("tmax"), r.get("precip"), r.get("risk_R"), r.get("risk_level"), adv[:70]))
+        if len(picked) >= max_days:
+            break
+    meta = d.get("meta") or {}
+    head = "数据时间 %s（season=%s）" % (meta.get("fetched_at") or meta.get("updated"), meta.get("season"))
+    return (head + "\n" + "\n".join(picked))[:max_chars]
+
+
 def _log_qa(request, req, out):
     """匿名记录一条问答（不含 IP/身份，按天加盐哈希）；用于教师纠偏与回训。"""
     try:
@@ -744,9 +779,16 @@ def _log_qa(request, req, out):
         ip = request.client.host if request.client else "?"
         salt = datetime.date.today().isoformat()
         anon = hashlib.sha256((salt + "|" + ip).encode()).hexdigest()[:12]
-        threading.Thread(target=store.qa_log_add,
-                         args=(anon, q, out.get("intent"), out.get("text"), req.engine),
-                         daemon=True).start()
+
+        def _bg():
+            try:
+                ev = _evidence_for_answer(out.get("text") or "")
+            except Exception:  # noqa: BLE001
+                ev = ""
+            store.qa_log_add(anon, q, out.get("intent"), out.get("text"), req.engine,
+                             chain=out.get("chain") or [], evidence=ev)
+
+        threading.Thread(target=_bg, daemon=True).start()
     except Exception:  # noqa: BLE001
         pass
 

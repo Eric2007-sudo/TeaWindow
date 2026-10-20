@@ -113,6 +113,7 @@ def fetch_forecast(days=16):
         "daily": ",".join(DAILY),
         "hourly": "temperature_2m,relative_humidity_2m",
         "forecast_days": days,
+        "past_days": 2,          # 补上"再分析归档滞后 2 天"的空档（如 10-20）
         "timezone": TZ,
     }
     return _get(*_om(url, params), fast429=True)   # 429 快速失败 → 立即切备用源
@@ -154,6 +155,60 @@ def fetch_forecast_metno(days=16):
     return out
 
 
+def _topup_archive(path, max_days=45):
+    """轻量刷新：把 archive 补到前天（ERA5 有约 2 天滞后）。
+    只发一次小请求、失败即放弃；否则"历史停在旧日期 + 预报从今天开始"会留下日期空洞，
+    问答会答"无逐日数据"、多日表格也会缺行。"""
+    try:
+        arc = json.load(open(path, encoding="utf-8"))
+        t = (arc.get("daily") or {}).get("time") or []
+        if not t:
+            return arc
+        last = date.fromisoformat(t[-1])
+        end = date.today() - timedelta(days=2)
+        gap = (end - last).days
+        if gap <= 0 or gap > max_days:
+            return arc
+        inc = fetch_archive((last + timedelta(days=1)).isoformat(), end.isoformat())
+        d_inc = inc.get("daily") or {}
+        days = d_inc.get("time") or []
+        if not days:
+            return arc
+        dst = arc["daily"]
+        for k, arr in list(dst.items()):
+            src = d_inc.get(k)
+            if not isinstance(arr, list) or not isinstance(src, list):
+                continue
+            arr.extend(src[i] if i < len(src) else None for i in range(len(days)))
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(arc, f, ensure_ascii=False)
+        print(f"[archive] 轻量补洞 +{len(days)} 天（{last} → {end}）")
+        return arc
+    except Exception as e:  # noqa: BLE001
+        print("[archive] 轻量补洞跳过:", e)
+        return None
+
+
+def _drop_overlap(fc, arc):
+    """预报里带 past_days 后，去掉与历史归档重复的日期，避免同一天出现两行。"""
+    try:
+        have = set(((arc.get("daily") or {}).get("time") or []))
+        d = fc.get("daily") or {}
+        t = d.get("time") or []
+        if not have or not t:
+            return fc
+        keep = [i for i, day in enumerate(t) if day not in have]
+        if len(keep) == len(t):
+            return fc
+        for k, arr in list(d.items()):
+            if isinstance(arr, list) and len(arr) == len(t):
+                d[k] = [arr[i] for i in keep]
+        print(f"[forecast] 去掉与历史重叠 {len(t) - len(keep)} 天")
+    except Exception:  # noqa: BLE001
+        pass
+    return fc
+
+
 def main():
     os.makedirs(RAW, exist_ok=True)
     end = (date.today() - timedelta(days=2)).isoformat()
@@ -176,7 +231,8 @@ def main():
         except Exception:  # noqa: BLE001
             pass
     if forecast_only and os.path.exists(ap_):
-        print("[archive] 轻量刷新：沿用已有历史（跳过 archive 抓取）")
+        _topup_archive(ap_)      # 只补缺口，不重抓全部历史（避免 429/8 分钟重试）
+        print("[archive] 轻量刷新：沿用已有历史（跳过 archive 全量抓取）")
         arc = {"daily": {"time": []}}
     else:
         try:
@@ -259,6 +315,11 @@ def main():
     if fc is None:
         raise RuntimeError("预报抓取失败且无本地缓存")
     fc["_source"] = src
+    try:                                     # 去掉与历史归档重复的日期（past_days 带来的）
+        _arc_eff = json.load(open(ap_, encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        _arc_eff = arc
+    fc = _drop_overlap(fc, _arc_eff)
     with open(fp, "w", encoding="utf-8") as f:
         json.dump(fc, f, ensure_ascii=False)
     print(f"  预报天数={len(fc.get('daily', {}).get('time', []))} 来源={src}")
@@ -267,7 +328,7 @@ def main():
     meta = {
         "fetched_at": _now(),
         "forecast_url": "https://api.open-meteo.com/v1/forecast",
-        "forecast_params": {"latitude": LAT, "longitude": LON, "forecast_days": 16, "timezone": TZ,
+        "forecast_params": {"latitude": LAT, "longitude": LON, "forecast_days": 16, "past_days": 2, "timezone": TZ,
                             "daily": ",".join(DAILY)},
         "archive_url": "https://archive-api.open-meteo.com/v1/archive",
         "archive_params": {"latitude": LAT, "longitude": LON, "start_date": start, "end_date": end, "timezone": TZ},
