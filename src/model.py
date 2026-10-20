@@ -190,7 +190,7 @@ def main():
 
     # 冻结评估集：测试期固定到提交日，之后新增的日期只进训练/展示，不再改变指标
     # （否则每次刷新 n 与 F1 都会漂移，论文/PPT/社区帖与 Demo 对不上）
-    TEST_END = os.environ.get("MODEL_TEST_END", "2026-10-20")
+    TEST_END = os.environ.get("MODEL_TEST_END", "2026-10-10")
     train_mask = (df["year"] <= 2023).values
     _tm = (df["year"] > 2023) & (df["date"] <= pd.Timestamp(TEST_END))
     test_mask = _tm.values if _tm.sum() >= 50 else (df["year"] > 2023).values
