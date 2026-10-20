@@ -233,6 +233,11 @@ def main():
     forecast_only = os.environ.get("TW_FETCH_FORECAST_ONLY") == "1"
     ap_ = os.path.join(RAW, "weather_archive.json")
     _base = os.path.join(ROOT, "data", "archive_baseline.json")
+    _canon = None
+    try:                                   # 冻结口径标记：全量重抓后仍保留，避免下次启动被重置
+        _canon = json.load(open(_base, encoding="utf-8")).get("_canon")
+    except Exception:  # noqa: BLE001
+        _canon = None
     if forecast_only and not os.path.exists(ap_) and os.path.exists(_base):
         try:                                   # 轻量刷新：先由完整基线恢复，避免 archive 重试拖慢
             import shutil
@@ -248,6 +253,8 @@ def main():
         try:
             print(f"[archive] {start} ~ {end} @ ({LAT},{LON})")
             arc = fetch_archive(start, end)
+            if _canon:
+                arc["_canon"] = _canon
             with open(ap_, "w", encoding="utf-8") as f:
                 json.dump(arc, f, ensure_ascii=False)
             n = len(arc.get("daily", {}).get("time", []))
