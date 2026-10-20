@@ -155,6 +155,16 @@ def fetch_forecast_metno(days=16):
     return out
 
 
+def _today_cst():
+    """按业务时区（Asia/Shanghai）取今天；容器多为 UTC，直接用 date.today() 会少一天。"""
+    try:
+        from zoneinfo import ZoneInfo
+        import datetime
+        return datetime.datetime.now(ZoneInfo(TZ)).date()
+    except Exception:  # noqa: BLE001
+        return date.today()
+
+
 def _topup_archive(path, max_days=45):
     """轻量刷新：把 archive 补到前天（ERA5 有约 2 天滞后）。
     只发一次小请求、失败即放弃；否则"历史停在旧日期 + 预报从今天开始"会留下日期空洞，
@@ -165,7 +175,7 @@ def _topup_archive(path, max_days=45):
         if not t:
             return arc
         last = date.fromisoformat(t[-1])
-        end = date.today() - timedelta(days=2)
+        end = _today_cst() - timedelta(days=2)
         gap = (end - last).days
         if gap <= 0 or gap > max_days:
             return arc
