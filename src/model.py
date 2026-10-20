@@ -188,8 +188,12 @@ def main():
     y, R = rubric(df)
     y = np.asarray(y).astype(float)
 
+    # 冻结评估集：测试期固定到提交日，之后新增的日期只进训练/展示，不再改变指标
+    # （否则每次刷新 n 与 F1 都会漂移，论文/PPT/社区帖与 Demo 对不上）
+    TEST_END = os.environ.get("MODEL_TEST_END", "2026-10-20")
     train_mask = (df["year"] <= 2023).values
-    test_mask = (df["year"] > 2023).values
+    _tm = (df["year"] > 2023) & (df["date"] <= pd.Timestamp(TEST_END))
+    test_mask = _tm.values if _tm.sum() >= 50 else (df["year"] > 2023).values
     m = GBDT().fit(Xv[train_mask], y[train_mask])
     p_test = m.predict_proba(Xv[test_mask])
     y_test = y[test_mask].astype(int)
@@ -197,7 +201,7 @@ def main():
     res = {
         "model": "gradient_boosting_trees (numpy, depth=3, n=250, lr=0.08)",
         "label": "弱标签：专家农艺规则复合风险 R>=0.5（倒春寒/高温/干旱 取最大）",
-        "train_years": "2015-2023", "test_years": "2024-2025",
+        "train_years": "2015-2023", "test_years": f"2024-{TEST_END}（冻结评估集）",
         "ml": metrics(y_test, p_test),
         "baseline_single_threshold(tmin<=2)": metrics(y_test, (df["temperature_2m_min"] <= 2).astype(int).values[test_mask]),
         "note": "标签由专家规则生成；模型学习多变量阈值与交互，并可用于预报前推。",
