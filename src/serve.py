@@ -476,6 +476,29 @@ def _ensure_raw():
                     open(fp, "w", encoding="utf-8").write(blob)
                     store.set_raw("weather_forecast.json", blob)
                     print("[serve] 由构建产物重建 forecast 缓存")
+        # 冻结归档口径：基线带 _canon 标记时，各环境统一以它为准，
+        # 保证"同一份代码 → 同一套指标"（否则 DB 缓存/重建来源不同会让 F1 漂移）
+        try:
+            base = os.path.join(ROOT, "data", "archive_baseline.json")
+            if os.path.exists(base):
+                b = json.load(open(base, encoding="utf-8"))
+                canon = b.get("_canon")
+                cur = None
+                if os.path.exists(ap):
+                    try:
+                        cur = json.load(open(ap, encoding="utf-8")).get("_canon")
+                    except Exception:  # noqa: BLE001
+                        cur = None
+                if canon and cur != canon:
+                    with open(ap, "w", encoding="utf-8") as f:
+                        json.dump(b, f, ensure_ascii=False)
+                    try:
+                        store.set_raw("weather_archive.json", json.dumps(b, ensure_ascii=False))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    print("[serve] 归档口径已对齐基线:", canon)
+        except Exception as e:  # noqa: BLE001
+            print("[serve] 归档口径检查跳过:", e)
     except Exception as e:  # noqa: BLE001
         print("[serve] raw 缓存确保跳过:", e)
 
