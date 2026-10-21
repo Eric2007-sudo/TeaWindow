@@ -10,9 +10,10 @@
   }
 
   (async function () {
-    var ov = await j("api/overview");
+    var LIVE = "https://teawindow.onrender.com";
+    var ov = (await j("api/overview")) || (await j(LIVE + "/api/overview"));
     var ph = await j("phenology.json");
-    var ver = await j("api/data/versions?limit=1");
+    var ver = (await j("api/data/versions?limit=1")) || (await j(LIVE + "/api/data/versions?limit=1"));
     var D = ov || window.TW_DATA || {};
     var M = D.metrics || {};
 
