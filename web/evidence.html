@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeaWindow · 验证与证据</title>
+<style>
+  :root{--bg:#0f1720;--panel:#16212b;--panel2:#1d2b37;--fg:#e8eef3;--muted:#8aa0b2;
+        --line:#26343f;--green:#3fb950;--yellow:#d6b657;--orange:#e08a3c;--red:#e5534b;--accent:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c141b,#0f1720);color:var(--fg);
+       font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;line-height:1.55}
+  header{padding:22px 26px 12px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:21px} h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-top:6px}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px 22px 60px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{color:var(--muted);font-size:12px}
+  .card .v{font-size:25px;font-weight:700;margin-top:6px}
+  .card .s{color:var(--muted);font-size:12px;margin-top:6px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .panel h2{margin:0 0 10px;font-size:15px;color:#cfe0ee;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  .note{color:var(--muted);font-size:12px}
+  .pill{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+        padding:3px 10px;font-size:12px;color:#bcd0de;margin:2px 6px 2px 0;text-decoration:none}
+  a{color:var(--accent)}
+  code{background:#0c141b;padding:1px 5px;border-radius:4px;font-size:12px}
+  .ok{color:var(--green)} .warn{color:var(--yellow)} .bad{color:var(--red)}
+  .cm{display:grid;grid-template-columns:120px 1fr 1fr;gap:6px;font-size:13px}
+  .cm div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .cm .h{background:transparent;border:0;color:var(--muted);font-size:12px;padding:2px 4px}
+  .snapnote{background:#3a2c12;border-bottom:1px solid #5a4318;color:#f0d9a8;font-size:13px;padding:8px 22px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap" style="padding-bottom:0">
+    <h1>梅坞采候 <span>TeaWindow</span> · 验证与证据</h1>
+    <div class="sub">所有数字都对应"冻结口径 + 外部真值 + 可复现命令"，并标明不能证明的部分。</div>
+    <div class="sub" style="margin-top:8px">
+      <a class="pill" href="index.html">返回看板</a>
+      <a class="pill" href="terrain.html">地块风险图</a>
+      <a class="pill" href="chat.html">智能问答</a>
+    </div>
+  </div>
+</header>
+<div id="snapnote" class="snapnote" hidden></div>
+<div class="wrap">
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>1. 复合风险模型 vs 单阈值基线（同一批测试行）</h2>
+    <div id="evalTable"></div>
+    <div class="note" id="evalNote" style="margin-top:8px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>2. 混淆矩阵（阈值 0.5，冻结评估集）</h2>
+    <div class="cm" id="cm"></div>
+    <div class="note" id="cmNote" style="margin-top:8px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>3. 外部真值：官方开采日验证</h2>
+    <div id="phenoTable"></div>
+    <div class="note" id="phenoNote" style="margin-top:8px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>4. 数据血缘（当前线上版本）</h2>
+    <div id="lineage" class="note">加载中…</div>
+  </div>
+
+  <div class="panel">
+    <h2>5. 可复现</h2>
+    <div class="note">
+      <code>python src/model.py</code> — 重训 GBDT 并输出指标（评估窗口由 <code>MODEL_TEST_END</code> 固定）<br>
+      <code>python src/phenology.py</code> — 官方开采日验证（不拟合 / 前向两套口径）<br>
+      <code>python -m pytest -q</code> — 134 项测试<br>
+      仓库：<a href="https://github.com/Eric2007-sudo/TeaWindow" target="_blank" rel="noopener">github.com/Eric2007-sudo/TeaWindow</a>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>6. 这些数字不能证明什么</h2>
+    <div class="note" id="limits"></div>
+  </div>
+
+</div>
+<script src="data.js"></script>
+<script src="evidence.js"></script>
+</body>
+</html>

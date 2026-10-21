@@ -3,21 +3,53 @@
   let D = window.TW_DATA;              // 离线内嵌数据（data.js）
   let online = false;
   const LIVE = "https://teawindow.onrender.com";   // 静态站(GitHub Pages)在线时回退到线上 API
-  async function tryApi(base) {
+  const SNAP_MS = 3000;                // 首屏等待上限：3 秒不返回就先用 data.js 秒开
+
+  async function tryApi(base, ms) {
+    const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    const timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms || SNAP_MS);
     try {
-      const r = await fetch(base + "/api/overview", { cache: "no-store" });
+      const r = await fetch(base + "/api/overview",
+        { cache: "no-store", signal: ctrl ? ctrl.signal : undefined });
       if (r.ok) return await r.json();
-    } catch (e) { /* ignore */ }
+    } catch (e) { /* 超时或离线：交给快照兜底 */ }
+    finally { clearTimeout(timer); }
     return null;
   }
-  try {
-    const same = await tryApi("");                  // 线上（同源）
-    if (same && same.days) { D = same; online = true; }
-    else {
-      const live = await tryApi(LIVE);              // 静态站 → 跨域回退到线上
-      if (live && live.days) { D = live; online = true; }
-    }
-  } catch (e) { /* 离线：忽略，使用内嵌数据 */ }
+
+  function snapNote(d, text) {
+    const el = document.getElementById("snapnote");
+    if (!el) return;
+    const t = (d && d.meta && (d.meta.fetched_at || d.meta.updated)) || "";
+    el.innerHTML = text + (t ? " · 快照时间 <b>" + String(t).replace(/[<>&]/g, "") + "</b>" : "");
+    el.hidden = false;
+  }
+  function hideSnapNote() {
+    const el = document.getElementById("snapnote");
+    if (el) el.hidden = true;
+  }
+
+  const same = await tryApi("", SNAP_MS);
+  if (same && same.days) {
+    D = same; online = true; hideSnapNote();
+  } else if (D) {
+    /* 服务在冷启动：立刻用本地 data.js 渲染，后台继续等，拿到新数据后自动刷新一次 */
+    snapNote(D, "⚡ 已用本地缓存秒开（后台正在唤醒服务…）");
+    (async function () {
+      let live = await tryApi("", 25000);
+      if (!(live && live.days)) live = await tryApi(LIVE, 15000);
+      if (live && live.days) {
+        try {
+          if (!sessionStorage.getItem("tw_snap_reloaded")) {
+            sessionStorage.setItem("tw_snap_reloaded", "1");
+            location.reload();
+          }
+        } catch (e) { /* 隐私模式忽略 */ }
+      } else {
+        snapNote(D, "⚠️ 服务暂未响应，当前为缓存快照（数据可能不是最新）");
+      }
+    })();
+  }
   if (!D) { alert("数据未加载：在线需 /api/overview，离线需 data.js"); return; }
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

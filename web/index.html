@@ -39,6 +39,8 @@
   a{color:var(--accent)}
   code{background:#0c141b;padding:1px 5px;border-radius:4px;font-size:12px}
   .note{color:var(--muted);font-size:12px}
+  .snapnote{background:#3a2c12;border-bottom:1px solid #5a4318;color:#f0d9a8;font-size:13px;padding:8px 22px}
+  .snapnote b{color:#ffd98a}
   @media (max-width:640px){
     header{padding:16px 14px 8px}
     .wrap{padding:12px 14px 48px}
@@ -72,11 +74,13 @@
       <a class="pill" href="sensor.html">传感器接入</a>
       <a class="pill" href="links.html">扫码分享</a>
       <a class="pill" href="terrain.html">地块风险图</a>
+      <a class="pill" href="evidence.html">验证与证据</a>
       <a class="pill" href="demo.html">自播放演示</a>
       <span class="pill" id="freshness">数据加载中…</span>
     </div>
   </div>
 </header>
+<div id="snapnote" class="snapnote" hidden></div>
 <div class="wrap">
   <div class="cards" id="cards"></div>
 

@@ -1,0 +1,39 @@
+name: Keepalive (pre-warm Render before judging)
+
+# Render 免费层约 15 分钟无流量即休眠，冷启动 30–60 秒。
+# 比赛评审/决赛期间（2026-10-19 ~ 10-28）用轻量 ping 保活，避免评委点开链接等半分钟。
+# 说明：GitHub 会对高频 schedule 节流（常延迟到 10–20 分钟）；若要稳定的 5 分钟级，
+# 用外部 pinger（cron-job.org / UptimeRobot）打 https://teawindow.onrender.com/api/health 。
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /api/health (wake + verify)
+        run: |
+          set -e
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/health.json -w "%{http_code}" --max-time 90 https://teawindow.onrender.com/api/health || true)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              python3 -c "import json;d=json.load(open('/tmp/health.json'));print('build',d.get('build'),'| age',d.get('age_minutes'),'| stale',d.get('stale'))"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "keepalive failed (service may be asleep); will retry next run"
+          exit 0
+
+      - name: Trigger refresh only if stale (>120 min)
+        run: |
+          curl -s --max-time 60 -X POST https://teawindow.onrender.com/api/refresh/auto || true

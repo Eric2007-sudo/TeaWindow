@@ -126,7 +126,9 @@
       render();
     }).catch(function (e) { $("#method").textContent = "地形数据未生成：" + e; });
 
-    fetch("api/overview", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+    var ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    if (ac) setTimeout(function () { if (ac) ac.abort(); }, 6000);
+    fetch("api/overview", { cache: "no-store", signal: ac ? ac.signal : undefined }).then(function (r) { return r.json(); }).then(function (d) {
       var fc = (d.days || []).filter(function (x) { return x.source === "forecast"; });
       SITE = fc.length ? fc[0] : null;
       $("#base").innerHTML = "站点基准（" + (SITE ? SITE.date : "-") + "）：R=" + (SITE ? SITE.risk_R : "-") +
@@ -134,7 +136,7 @@
         ((d.meta && d.meta.updated) || d.updated || "-") + "（每 60 秒自动刷新）";
       render();
     }).catch(function () {
-      $("#base").textContent = "未能读取实时预报（显示网格内置 R）。";
+      $("#base").textContent = "服务唤醒中（约 30–60 秒）：当前用网格内置 R 渲染，稍后刷新即可看到实时风险。";
       render();
     });
 

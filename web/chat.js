@@ -103,7 +103,7 @@
         try { detail = (await r.json()).detail || ""; } catch (e) { /* ignore */ }
         if (r.status === 429) add("请求过于频繁，请稍后再试。" + (detail ? "（" + detail + "）" : ""), "bot err");
         else if (r.status >= 400 && r.status < 500) add("输入有误：" + (detail || r.status), "bot err");
-        else add("服务暂时不可用（" + r.status + "），请稍后重试。", "bot err");
+        else add("服务正在唤醒（免费实例冷启动约 30–60 秒）或暂时不可用，请 20 秒后点重试。", "bot err");
         addRetry(q);
         messages.pop();
         return;
@@ -119,7 +119,7 @@
       try { localStorage.setItem(LS, JSON.stringify({ messages: messages.slice(-20), state: state })); } catch (e) { /* ignore */ }
     } catch (e) {
       typing.remove();
-      const msg = (e && e.name === "AbortError") ? "请求超时，请重试。" : "网络异常或服务不可用，请检查网络后重试。";
+      const msg = (e && e.name === "AbortError") ? "请求超时（服务可能正在唤醒），请重试。" : "网络异常或服务不可用（可能正在冷启动），请 20 秒后重试。";
       add(msg, "bot err");
       addRetry(q);
       messages.pop();
@@ -159,4 +159,7 @@
     const qp = new URLSearchParams(location.search).get("q");
     if (qp && qp.trim()) { input.value = qp.trim(); submit(qp.trim()); }
   } catch (e) { /* ignore */ }
+
+  // 预热：打开页面即唤醒服务，减少第一次提问的等待
+  try { fetch("api/health", { cache: "no-store" }).catch(function () {}); } catch (e) { /* ignore */ }
 })();

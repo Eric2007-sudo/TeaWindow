@@ -38,24 +38,44 @@ def predict(g, base, start_md, thr):
     return hit["date"].iloc[0] if len(hit) else None
 
 
+def _mae(df, years, start, base, thr):
+    errs = []
+    for y in years:
+        p = predict(df[df["year"] == y], base, start, float(thr))
+        errs.append(abs((pd.Timestamp(OFFICIAL[y]) - p).days) if p is not None else 99)
+    return float(np.mean(errs))
+
+
+def _fit(df, years):
+    """在给定年份上网格搜索 (start, base, thr)，返回 (mae, start, base, thr)。"""
+    best = None
+    for start in ["01-01", "01-15", "02-01"]:
+        for base in [6, 8, 10, 12]:
+            for thr in np.arange(20, 161, 2.5):
+                mae = _mae(df, years, start, base, float(thr))
+                if best is None or mae < best[0]:
+                    best = (mae, start, base, float(thr))
+    return best
+
+
 def main():
     df = pd.read_csv(os.path.join(PROC, "daily.csv"))
     df["date"] = pd.to_datetime(df["date"])
     years = [y for y in OFFICIAL if y in set(df["year"])]
 
-    # 网格拟合 base/start/thr
-    best = None
-    for start in ["01-01", "01-15", "02-01"]:
-        for base in [6, 8, 10, 12]:
-            for thr in np.arange(20, 161, 2.5):
-                errs = []
-                for y in years:
-                    p = predict(df[df["year"] == y], base, start, float(thr))
-                    errs.append(abs((pd.Timestamp(OFFICIAL[y]) - p).days) if p is not None else 99)
-                mae = float(np.mean(errs))
-                if best is None or mae < best[0]:
-                    best = (mae, start, base, float(thr))
+    # 1) 网格拟合（全样本，仅作参考）
+    best = _fit(df, years)
     mae, start, base, thr = best
+
+    # 2) 文献阈值，不拟合官方日期（更强的外部验证）
+    FIX_START, FIX_BASE, FIX_THR = "01-01", 6, 117.5
+    fixed_mae = _mae(df, years, FIX_START, FIX_BASE, FIX_THR)
+
+    # 3) 前向验证：2022–2023 拟合 → 2024–2026 测试
+    fwd_years = [y for y in years if y <= 2023]
+    test_years = [y for y in years if y > 2023]
+    fwd_fit = _fit(df, fwd_years) if len(fwd_years) >= 2 else None
+    fwd_mae = _mae(df, test_years, fwd_fit[1], fwd_fit[2], fwd_fit[3]) if fwd_fit and test_years else None
 
     rows = []
     for y in years:
@@ -74,7 +94,11 @@ def main():
           "| 年份 | 官方开采日 | 模型预测 | 偏差(天) |", "|---|---|---|---|"]
     for r in rows:
         md.append(f"| {r['year']} | {r['official']} | {r['pred']} | {r['diff']:+d} |")
-    md += [f"\n- **模型 MAE = {mae:.1f} 天**；朴素固定日期(3-19)基线 MAE = {naive_mae:.1f} 天。",
+    md += [f"\n- **网格拟合 MAE = {mae:.1f} 天**（in-sample，仅作参考）；朴素固定日期(3-19)基线 MAE = {naive_mae:.1f} 天。",
+           f"- **不拟合官方日期**（文献阈值：基温 {FIX_BASE}℃、起算 {FIX_START}、阈值 {FIX_THR}℃·d）：**MAE = {fixed_mae:.1f} 天**。",
+           (f"- **前向验证**（{fwd_years[0]}–{fwd_years[-1]} 拟合 → {test_years[0]}–{test_years[-1]} 测试）："
+            f"**MAE = {fwd_mae:.1f} 天**（阈值 {fwd_fit[3]:.1f}、基温 {fwd_fit[2]}℃）。" if (fwd_fit and fwd_mae is not None)
+            else "- 前向验证：样本年份不足，跳过。"),
            f"- 模型**精确命中 2023 提前年**（官方 3-13，预测 {hit2023['pred']}，偏差 {hit2023['diff']:+d} 天）——说明其对年份波动有响应。",
            "- 诚实说明：2022–2026 开采日集中在 3-19/20，故固定日期基线亦表现良好；积温模型的**相对优势在于异常年与可迁移性**。",
            "- 意义：这是**基于官方外部真值**的独立验证，用于部分回应『弱标签』质疑（另见台站观测交叉验证）。",
@@ -88,6 +112,25 @@ def main():
     with open(os.path.join(REPORT, "phenology_validation.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(md))
     print("\n".join(md))
+
+    # 结构化输出（供 /evidence 页面与问答使用）
+    try:
+        payload = {
+            "official": {str(k): v for k, v in OFFICIAL.items()},
+            "rows": rows,
+            "fit": {"mae": round(mae, 2), "start": start, "base": base, "thr": round(thr, 1)},
+            "fixed": {"mae": round(fixed_mae, 2), "start": FIX_START, "base": FIX_BASE, "thr": FIX_THR},
+            "forward": ({"mae": round(fwd_mae, 2), "fit_years": fwd_years, "test_years": test_years,
+                         "start": fwd_fit[1], "base": fwd_fit[2], "thr": round(fwd_fit[3], 1)}
+                        if (fwd_fit and fwd_mae is not None) else None),
+            "naive": {"date": "03-19", "mae": round(naive_mae, 2)},
+            "note": "官方开采日为外部真值；fixed 为不拟合参数的文献阈值口径，forward 为前向验证。",
+        }
+        with open(os.path.join(ROOT, "web", "phenology.json"), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=1)
+        print("-> web/phenology.json")
+    except Exception as e:  # noqa: BLE001
+        print("写 phenology.json 失败:", e)
 
     # 注入 web/data.json（供问答引擎与前端使用）
     try:
