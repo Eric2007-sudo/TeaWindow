@@ -746,8 +746,19 @@ def _gate(q, out):
         return out
     out["gate"] = v
     note = v.get("note")
+    fmt = (out.get("format") or "").lower()
     if note and v.get("decision") in ("annotate", "review"):
-        out["text"] = (out.get("text") or "") + "\n\n" + note
+        if fmt == "json":
+            # JSON 回答不能被追加散文，否则前端解析失败：把结论塞进 JSON 字段
+            try:
+                import json as _json
+                obj = _json.loads(out.get("text") or "{}")
+                obj["gate"] = v
+                out["text"] = _json.dumps(obj, ensure_ascii=False)
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            out["text"] = (out.get("text") or "") + "\n\n" + note
     return out
 
 

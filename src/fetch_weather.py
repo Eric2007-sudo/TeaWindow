@@ -175,7 +175,8 @@ def _topup_archive(path, max_days=45):
         if not t:
             return arc
         last = date.fromisoformat(t[-1])
-        end = _today_cst() - timedelta(days=2)
+        # 尽量补到「昨天」：MET Norway 预报没有 past_days，只补到前天会留下 1 天空洞
+        end = _today_cst() - timedelta(days=1)
         gap = (end - last).days
         if gap <= 0 or gap > max_days:
             return arc
