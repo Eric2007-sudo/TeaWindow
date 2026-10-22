@@ -113,7 +113,10 @@
       const isLLM = d.engine === "teawindow-own+llm" || d.source === "deepseek-rephrase";
       const label = isLLM ? "引擎：自研 + DeepSeek 润色" : "引擎：TeaWindow 自研";
       const be = d.backend ? "　后端：" + d.backend : "";
-      const meta = label + be + (d.intent ? "　意图：" + d.intent + "（置信 " + d.confidence + "）" + (d.follow_up ? " · 追问" : "") : "");
+      const gateTxt = d.gate && d.gate.scores
+        ? "　核对 " + Math.round((d.gate.scores.supported || 0) * 100) + "%" + (d.gate.decision === "ok" ? "" : "（" + d.gate.decision + "）")
+        : "";
+      const meta = label + be + gateTxt + (d.intent ? "　意图：" + d.intent + "（置信 " + d.confidence + "）" + (d.follow_up ? " · 追问" : "") : "");
       add(d.text, "bot", meta, d.chain);
       messages.push({ role: "assistant", content: d.text });
       try { localStorage.setItem(LS, JSON.stringify({ messages: messages.slice(-20), state: state })); } catch (e) { /* ignore */ }

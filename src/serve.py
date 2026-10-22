@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field, ConfigDict, field_validator  # noqa: E402
 
 import llm_advice  # noqa: E402  (触发 .env 加载)
+import decision_client  # noqa: E402  (可选：StartLux 决策模型)
 import season  # noqa: E402  (统一季节与北京业务日)
 import store  # noqa: E402  (SQLite 持久化：上报/传感器)
 
@@ -142,6 +143,7 @@ class AskResp(BaseModel):
     note: str | None = None
     format: str | None = None
     state: dict | None = None
+    gate: dict | None = None
 
 
 def _load():
@@ -725,6 +727,30 @@ _BOOT_TS = _time.time()
 COLD_WINDOW_S = int(os.environ.get("COLD_WINDOW_S", "90"))   # 启动后 N 秒内视为冷启动
 
 
+def _gate(q, out):
+    """1+5：自研生成 → StartLux 放行 + 事实核对。
+    未开启（STARTLUX_GATE!=1）、未配置 key、超时或异常 → 原样放行（fail-open）。"""
+    if os.environ.get("STARTLUX_GATE", "0") != "1" or not decision_client.enabled():
+        return out
+    try:
+        from qa import gate as qa_gate
+        ev = _evidence_for_answer(out.get("text") or "")
+        v = qa_gate.review(q, out.get("text") or "", ev)
+    except Exception as e:  # noqa: BLE001
+        try:
+            print("[gate] 跳过:", repr(e)[:120])
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+    if not v:
+        return out
+    out["gate"] = v
+    note = v.get("note")
+    if note and v.get("decision") in ("annotate", "review"):
+        out["text"] = (out.get("text") or "") + "\n\n" + note
+    return out
+
+
 def _ask(q, engine, history=None, state=None):
     from qa import engine as qa_engine
     try:
@@ -743,7 +769,7 @@ def _ask(q, engine, history=None, state=None):
             out = dict(base)
             out["source"] = "budget_fallback"
             out["note"] = "LLM 每日预算已用尽，本次返回自研规则答案。"
-            return out
+            return _gate(q, out)
         # P0-1：LLM 只润色，数值/结论/极性/季节以规则为准，校验失败回退规则
         rep = llm_advice.rephrase_keep_numbers(q, base["text"])
         out = dict(base)
@@ -751,8 +777,8 @@ def _ask(q, engine, history=None, state=None):
         out["source"] = rep["source"]
         out["base_text"] = base["text"]
         out["text"] = rep["text"]
-        return out
-    return base
+        return _gate(q, out)
+    return _gate(q, base)
 
 
 def _evidence_for_answer(text, max_days=6, max_chars=1600):
@@ -814,6 +840,32 @@ def _log_qa(request, req, out):
         threading.Thread(target=_bg, daemon=True).start()
     except Exception:  # noqa: BLE001
         pass
+
+
+class DecideReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    state: str | dict
+    questions: dict
+    think_mode: Literal["auto", "never", "always"] = "auto"
+    gate: float = 0.9
+
+
+@app.post("/api/decide")
+def decide_api(request: Request, req: DecideReq):
+    """可选：把「状态 + 类型化问题」交给 StartLux 决策模型，返回每个选项的校准概率。
+    未配置 STARTLUX_API_KEY 时返回 503；模型报错返回 502。
+    规则引擎仍是主路径——本接口只作第二意见，不覆盖安全结论。"""
+    ip = request.client.host if request.client else "global"
+    _rate_limit("decide:" + ip, limit=int(os.environ.get("DECIDE_RPM", "10")))
+    if not decision_client.enabled():
+        raise HTTPException(503, "decision model not configured (set STARTLUX_API_KEY)")
+    try:
+        return decision_client.decide(req.state, req.questions,
+                                      think_mode=req.think_mode, gate=req.gate)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"decision model error: {str(e)[:200]}")
 
 
 @app.post("/api/ask", response_model=AskResp,
