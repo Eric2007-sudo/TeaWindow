@@ -813,6 +813,19 @@ def _evidence_for_answer(text, max_days=6, max_chars=1600):
             break
     meta = d.get("meta") or {}
     head = "数据时间 %s（season=%s）" % (meta.get("fetched_at") or meta.get("updated"), meta.get("season"))
+    head += "\n季节口径：season=off 表示非春采期；西湖龙井 43 春采季为 3–4 月，此间以养护/防冻/防旱/排涝为主。"
+    # 运维/模型类回答需要系统事实做证据（否则事实核对会把正确回答误判为"无依据"）
+    if any(k in (text or "") for k in ("版本", "刷新", "数据", "模型", "评估", "来源", "AUC", "F1")):
+        try:
+            rs = store.get_refresh_state() or {}
+            vs = store.list_versions(1) or []
+            vv = vs[0] if vs else {}
+            ml = ((d.get("metrics") or {}).get("ml") or {})
+            head += ("\n系统：刷新状态 %s，上次成功 %s；数据版本 v%s（%s，构建 %s，上游 %s）；评估 AUC %s / F1 %s"
+                     % (rs.get("status"), rs.get("last_success"), vv.get("id"), vv.get("ts"),
+                        vv.get("build"), vv.get("upstream_url"), ml.get("auc"), ml.get("f1")))
+        except Exception:  # noqa: BLE001
+            pass
     return (head + "\n" + "\n".join(picked))[:max_chars]
 
 

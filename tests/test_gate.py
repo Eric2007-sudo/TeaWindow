@@ -36,7 +36,7 @@ def test_low_support_annotates(monkeypatch):
 def test_mid_scores_request_review(monkeypatch):
     monkeypatch.setattr(gate.decision_client, "try_decide", _fake({
         "supported": {"type": "noul", "noul": 0.75},
-        "actionable": {"type": "noul", "noul": 0.6},
+        "actionable": {"type": "noul", "noul": 0.3},
         "safe": {"type": "noul", "noul": 0.8},
     }))
     v = gate.review("q", "a", "evidence")

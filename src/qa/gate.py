@@ -53,8 +53,9 @@ def review(question, answer, evidence, timeout=None):
         "answer": answer or "",
         "evidence": evidence or "(无可用证据)",
     }
-    t = timeout or float(os.environ.get("STARTLUX_GATE_TIMEOUT", "6"))
-    out = decision_client.try_decide(state, QUESTIONS, think_mode="auto", gate=0.9, timeout=t)
+    t = timeout or float(os.environ.get("STARTLUX_GATE_TIMEOUT", "8"))
+    mode = os.environ.get("STARTLUX_THINK", "never")      # 护栏用单次前向：1.3s vs 3.1s
+    out = decision_client.try_decide(state, QUESTIONS, think_mode=mode, gate=0.9, timeout=t)
     if not out:
         return None
 
@@ -66,9 +67,9 @@ def review(question, answer, evidence, timeout=None):
         usab = None
 
     decision, note = "ok", ""
-    if sup < 0.5 or safe < 0.4:
+    if sup < 0.25 or safe < 0.30:
         decision, note = "annotate", ANNOTATE_LOW_SUPPORT
-    elif min(sup, act, safe) < 0.7:
+    elif sup < 0.45 or act < 0.35:
         decision, note = "review", ANNOTATE_REVIEW
 
     return {
