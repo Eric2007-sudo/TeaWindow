@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "startlux": {
+        "type": "local",
+        "command": [
+          "python",
+          "tools/startlux_mcp.py"
+        ],
+        "environment": {
+          "PYTHONUTF8": "1"
+        }
+      }
+    }
+  }
+}

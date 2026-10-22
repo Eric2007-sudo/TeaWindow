@@ -32,6 +32,26 @@ SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+
+def _load_env():
+    """从项目根 .env 读取 key（避免把密钥写进 opencode 配置）。"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, ".env")
+    if not os.path.exists(p):
+        return
+    try:
+        for line in open(p, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_load_env()
+
 import decision_client  # noqa: E402
 
 PROTOCOL = "2025-06-18"
@@ -48,7 +68,8 @@ TOOLS = [
             "properties": {
                 "state": {"type": ["string", "object"], "description": "Text or JSON describing the situation"},
                 "questions": {"type": "object", "description": "Map of question id → typed question"},
-                "think_mode": {"type": "string", "enum": ["auto", "never", "always"], "default": "auto"},
+                "think_mode": {"type": "string", "enum": ["auto", "never", "always"], "default": "never"},
+                "timeout": {"type": "number", "default": 25},
                 "gate": {"type": "number", "default": 0.9},
             },
             "required": ["state", "questions"],
@@ -64,7 +85,8 @@ TOOLS = [
                 "state": {"type": ["string", "object"]},
                 "instructions": {"type": "string"},
                 "options": {"type": "array", "items": {"type": "string"}},
-                "think_mode": {"type": "string", "enum": ["auto", "never", "always"], "default": "auto"},
+                "think_mode": {"type": "string", "enum": ["auto", "never", "always"], "default": "never"},
+                "timeout": {"type": "number", "default": 25},
                 "gate": {"type": "number", "default": 0.9},
             },
             "required": ["state", "instructions", "options"],
@@ -87,8 +109,8 @@ def _call(name, args):
 
     if name == "startlux_decide":
         out = decision_client.decide(args["state"], args["questions"],
-                                     think_mode=args.get("think_mode", "auto"),
-                                     gate=args.get("gate", 0.9))
+                                     think_mode=args.get("think_mode", "never"),
+                                     gate=args.get("gate", 0.9), timeout=float(args.get("timeout", 25)))
         return _text(out)
 
     if name == "startlux_choose":
@@ -98,8 +120,8 @@ def _call(name, args):
         criteria = {str(o): str(o) for o in opts}
         questions = {"choice": {"type": "choice", "instructions": args["instructions"], "criteria": criteria}}
         out = decision_client.decide(args["state"], questions,
-                                     think_mode=args.get("think_mode", "auto"),
-                                     gate=args.get("gate", 0.9))
+                                     think_mode=args.get("think_mode", "never"),
+                                     gate=args.get("gate", 0.9), timeout=float(args.get("timeout", 25)))
         label, conf, raw = decision_client.best(out.get("answers"), "choice")
         out["picked"] = label
         out["confidence"] = round(conf, 4)
