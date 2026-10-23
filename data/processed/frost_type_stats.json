@@ -1,0 +1,26 @@
+{
+ "total": 1033,
+ "by_type": {
+  "平流霜": {
+   "n": 919,
+   "mae_raw": 3.29,
+   "bias_raw": -3.28,
+   "mae_corr": 1.09,
+   "bias_corr": -0.21
+  },
+  "无霜冻": {
+   "n": 16,
+   "mae_raw": 2.73,
+   "bias_raw": -2.73,
+   "mae_corr": 0.53,
+   "bias_corr": 0.36
+  },
+  "辐射霜": {
+   "n": 98,
+   "mae_raw": 3.15,
+   "bias_raw": -3.15,
+   "mae_corr": 0.99,
+   "bias_corr": -0.08
+  }
+ }
+}
