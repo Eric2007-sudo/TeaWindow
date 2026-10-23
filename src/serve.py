@@ -727,38 +727,65 @@ _BOOT_TS = _time.time()
 COLD_WINDOW_S = int(os.environ.get("COLD_WINDOW_S", "90"))   # 启动后 N 秒内视为冷启动
 
 
+def _data_health():
+    """确定性数据体检：新鲜度 / 空洞 / 上游漂移 / 刷新状态 / 血缘。"""
+    try:
+        from qa import health as qa_health
+        d = _load()
+        return qa_health.assess(d.get("meta") or {}, d.get("days") or [],
+                                store.get_refresh_state() or {},
+                                _COMPARE.get("result") or {}, STALE_MINUTES)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _gate(q, out):
-    """1+5：自研生成 → StartLux 放行 + 事实核对。
-    未开启（STARTLUX_GATE!=1）、未配置 key、超时或异常 → 原样放行（fail-open）。"""
+    """1+5：自研生成 → StartLux 放行 + 事实核对 →（可选）有界修复闭环。
+    未开启、未配置 key、超时或异常 → 原样放行（fail-open）。"""
     if os.environ.get("STARTLUX_GATE", "0") != "1" or not decision_client.enabled():
         return out
+    text = out.get("text") or ""
+    ev, v, trace, new_text = "", None, None, text
     try:
         from qa import gate as qa_gate
-        ev = _evidence_for_answer(out.get("text") or "")
-        v = qa_gate.review(q, out.get("text") or "", ev)
+        ev = _evidence_for_answer(text)
+        if os.environ.get("STARTLUX_LOOP", "1") == "1":
+            from qa import loop as qa_loop
+            res = qa_loop.run(q, text, ev, max_rounds=int(os.environ.get("STARTLUX_ROUNDS", "2")))
+            v, trace = res.get("verdict"), res.get("trace")
+            new_text = res.get("answer") or text
+        else:
+            v = qa_gate.review(q, text, ev)
     except Exception as e:  # noqa: BLE001
         try:
             print("[gate] 跳过:", repr(e)[:120])
         except Exception:  # noqa: BLE001
             pass
         return out
-    if not v:
+
+    health = _data_health()
+    if health and health.get("verdict") == "unreliable":
+        v = dict(v or {})
+        v["decision"] = "annotate"
+        v["note"] = (v.get("note") or "") + " ⚠️ 数据体检未通过：" + "；".join(health.get("notes") or [])
+
+    if not v and not health:
         return out
-    out["gate"] = v
-    note = v.get("note")
+
+    out["gate"] = dict(v or {}, data=health, trace=trace)
+    note = (v or {}).get("note")
     fmt = (out.get("format") or "").lower()
-    if note and v.get("decision") in ("annotate", "review"):
+    if note and (v or {}).get("decision") in ("annotate", "review"):
         if fmt == "json":
-            # JSON 回答不能被追加散文，否则前端解析失败：把结论塞进 JSON 字段
             try:
                 import json as _json
-                obj = _json.loads(out.get("text") or "{}")
-                obj["gate"] = v
+                obj = _json.loads(text or "{}")
+                obj["gate"] = out["gate"]
                 out["text"] = _json.dumps(obj, ensure_ascii=False)
             except Exception:  # noqa: BLE001
                 pass
         else:
-            out["text"] = (out.get("text") or "") + "\n\n" + note
+            out["text"] = new_text
     return out
 
 
