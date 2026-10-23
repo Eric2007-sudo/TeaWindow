@@ -22,6 +22,26 @@ DEFAULT_BASE = "https://api.bamboonode.dev/v1"
 DEFAULT_MODEL = "startlux-decision-27b-autothink"
 
 
+def _load_env():
+    """独立脚本/测试里也能读到项目 .env（不覆盖已有环境变量）。"""
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        p = os.path.join(root, ".env")
+        if not os.path.exists(p):
+            return
+        for line in open(p, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_load_env()
+
+
 def _base():
     return (os.environ.get("STARTLUX_BASE_URL") or DEFAULT_BASE).rstrip("/")
 

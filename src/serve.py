@@ -723,6 +723,7 @@ class OutcomeReq(BaseModel):
 # 运行指标（进程内，用于监控/告警）
 _METRICS = {"total": 0, "errors": 0, "by_path": {}, "latency_ms_sum": 0.0, "latency_max_ms": 0.0,
             "lat": [], "cold": [], "hot": []}
+_ASSIST_CACHE = {}
 _BOOT_TS = _time.time()
 COLD_WINDOW_S = int(os.environ.get("COLD_WINDOW_S", "90"))   # 启动后 N 秒内视为冷启动
 
@@ -918,6 +919,39 @@ def decide_api(request: Request, req: DecideReq):
         raise HTTPException(422, str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"decision model error: {str(e)[:200]}")
+
+
+@app.get("/api/forecast/assist")
+def forecast_assist(date: str = ""):
+    """预测辅助：给定日期（默认最近预报日），让决策模型判断霜型/一致性/置信度。
+    只返回元信息，不改动任何数值预测。结果按"日期 + 数据版本"缓存。"""
+    if not decision_client.enabled():
+        raise HTTPException(503, "decision model not configured (set STARTLUX_API_KEY)")
+    d = _load()
+    days = d.get("days") or []
+    fc = [x for x in days if x.get("source") == "forecast"]
+    row = next((x for x in fc if x.get("date") == date), None) if date else (fc[0] if fc else None)
+    if not row:
+        raise HTTPException(404, "date not found in forecast window")
+    ver = (d.get("meta") or {}).get("fetched_at") or (d.get("meta") or {}).get("updated")
+    key = (row.get("date"), ver)
+    cached = _ASSIST_CACHE.get(key)
+    if cached:
+        return {"date": row.get("date"), "numbers": cached["numbers"], "assist": cached["assist"], "cached": True}
+    try:
+        from qa import predict_assist
+        row = dict(row)
+        row["season"] = (d.get("meta") or {}).get("season")
+        v = predict_assist.assess(row)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"assist error: {str(e)[:160]}")
+    if not v:
+        raise HTTPException(502, "decision model unavailable")
+    numbers = {k: row.get(k) for k in ("tmin", "tmax", "precip", "risk_R", "risk_level", "p_frost")}
+    if len(_ASSIST_CACHE) > 256:
+        _ASSIST_CACHE.clear()
+    _ASSIST_CACHE[key] = {"numbers": numbers, "assist": v}
+    return {"date": row.get("date"), "numbers": numbers, "assist": v}
 
 
 @app.post("/api/ask", response_model=AskResp,
