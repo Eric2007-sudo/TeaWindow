@@ -15,12 +15,17 @@
     $("#list").innerHTML = d.pending.map(function (x) {
       var chain = (x.chain && x.chain.length)
         ? '<div class="meta">来源链：' + esc(x.chain.join(" → ")) + '</div>' : '';
+      var g = x.gate
+        ? '<div class="meta">核对：' + esc(x.gate.decision || "-")
+          + ' · 证据 ' + Math.round((((x.gate.scores || {}).supported) || 0) * 100) + '%'
+          + ' · 行动 ' + Math.round((((x.gate.scores || {}).actionable) || 0) * 100) + '%'
+          + '</div>' : '';
       var ev = x.evidence
         ? '<details class="ev"><summary>证据快照（当天数据）</summary><div class="a">' + esc(x.evidence) + '</div></details>' : '';
       return '<div class="row"><div class="q">' + esc(x.question) + '</div>'
         + '<div class="meta">#' + x.id + " · " + esc(x.ts) + " · 意图 " + esc(x.intent) + " · 引擎 " + esc(x.engine) + '</div>'
         + '<div class="a">' + esc(x.answer) + '</div>'
-        + chain + ev
+        + chain + g + ev
         + '<div class="act"><button class="p" data-id="' + x.id + '" data-rel="1">相关·收藏</button>'
         + '<button data-id="' + x.id + '" data-rel="0">不相关</button>'
         + '<button data-id="' + x.id + '" data-rel="1" data-done="1">已审阅</button></div></div>';

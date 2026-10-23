@@ -886,7 +886,8 @@ def _log_qa(request, req, out):
             except Exception:  # noqa: BLE001
                 ev = ""
             store.qa_log_add(anon, q, out.get("intent"), out.get("text"), req.engine,
-                             chain=out.get("chain") or [], evidence=ev)
+                             chain=out.get("chain") or [], evidence=ev,
+                             gate=(json.dumps(out.get("gate"), ensure_ascii=False) if out.get("gate") else ""))
 
         threading.Thread(target=_bg, daemon=True).start()
     except Exception:  # noqa: BLE001
