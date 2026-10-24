@@ -13,8 +13,8 @@
 |---|---|---:|---|
 | 01 | `01_TeaWindow_Pitch_EN.pptx` | 1.13 MB | 英文 PPT（12 页，评委主用） |
 | 02 | `02_TeaWindow_Pitch_CN.pptx` | 1.08 MB | 中文 PPT（12 页，同版式） |
-| 03 | `03_TeaWindow_Demo_EN.mp4` | 1.72 MB | 英文演示视频（2:48） |
-| 04 | `04_TeaWindow_Demo_CN.mp4` | 1.78 MB | 中文演示视频（2:48） |
+| 03 | `03_TeaWindow_Demo_EN.mp4` | 0.92 MB | 英文演示视频（2:48） |
+| 04 | `04_TeaWindow_Demo_CN.mp4` | 0.95 MB | 中文演示视频（2:48） |
 | 05 | `05_TeaWindow_Architecture_EN.pptx` | 0.35 MB | 英文 1+5 架构页（1 页） |
 | 06 | `06_TeaWindow_Architecture_CN.pptx` | 0.42 MB | 中文 1+5 架构页（1 页） |
 | 05 | `05_TeaWindow_Architecture_EN.png` | 0.34 MB | 英文架构页 PNG |
