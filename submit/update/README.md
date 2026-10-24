@@ -20,6 +20,7 @@
 | 02 | `02_TeaWindow_Pitch_CN.pptx` | 1.58 MB | 中文 PPT（14 页：12 + 团队页 + 架构页） |
 | 02 | `02_TeaWindow_Pitch_CN.pdf` | 1.11 MB | 中文 PDF（微信可直接预览） |
 | 03 | `03_TeaWindow_Demo_EN.mp4` | 0.92 MB | 英文演示视频（2:48，30fps） |
+| 04 | `04_TeaWindow_Demo_CN.mp4` | 0.95 MB | 中文演示视频（2:48，30fps） |
 
 ## 怎么发微信
 
