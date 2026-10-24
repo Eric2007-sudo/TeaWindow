@@ -14,7 +14,8 @@ import imageio.v2 as imageio
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
-OUT = os.path.join(ROOT, "submit", "演示视频_自动播放.mp4")
+LANG = os.environ.get("VIDEO_LANG", "cn")
+OUT = os.path.join(ROOT, "submit", "演示视频_EN.mp4" if LANG == "en" else "演示视频_自动播放.mp4")
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 N_SLIDES = 21
 SECS_PER_SLIDE = 8
@@ -32,7 +33,7 @@ def main():
         frames = []
         for n in range(N_SLIDES):
             png = os.path.join(tmp, f"frame_{n}.png")
-            url = f"file:///{tmp.replace(os.sep, '/')}/demo.html?slide={n}&clean=1"
+            url = f"file:///{tmp.replace(os.sep, '/')}/demo.html?slide={n}&clean=1&lang={LANG}"
             subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
                             "--window-size=1280,720", "--virtual-time-budget=1800",
                             f"--screenshot={png}", url], capture_output=True)

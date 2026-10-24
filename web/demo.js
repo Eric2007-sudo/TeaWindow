@@ -5,7 +5,7 @@
   const auc = D ? (D.metrics && D.metrics.ml ? D.metrics.ml.auc : "0.998") : "0.998";
   const f1 = D ? (D.metrics && D.metrics.ml ? D.metrics.ml.f1 : "0.854") : "0.854";
 
-  const slides = [
+  const slidesCN = [
     { hero: true, title: "梅坞采候 TeaWindow",
       sub: "梅家坞（西湖龙井核心产区）· 龙井 43 号「倒春寒 × 高温」复合风险预警与采摘窗口决策助手",
       kpis: ["AI4Climate 赛道 01", "One Place · One Climate Problem · One AI Solution", "在线 Demo + 开源仓库"] },
@@ -51,6 +51,56 @@
       sub: "梅坞采候，让 AI 走进真实茶园。",
       kpis: ["https://teawindow.onrender.com", "https://eric2007-sudo.github.io/TeaWindow/"] },
   ];
+
+
+  const slidesEN = [
+    { hero: true, title: "TeaWindow",
+      sub: "Meijiawu, West Lake Longjing core area · compound risk (late frost x heat) and picking-window decision assistant for Longjing 43",
+      kpis: ["AI4Climate Track 01", "One Place · One Climate Problem · One AI Solution", "Live demo + open-source repo"] },
+    { title: "Problem: real and verifiable", img: "demo_assets/fig_yearly.png",
+      cap: "About 70% of Meijiawu tea gardens grow early-budding, drought-sensitive Longjing 43; frost and heat days vary sharply by year." },
+    { title: "Solution: turn signals into action", img: "demo_assets/dashboard.png",
+      cap: "Weather (Open-Meteo ERA5 + MET Norway, dual source) + remote sensing + terrain -> compound risk -> picking suitability and window -> plain-language advice, online and offline." },
+    { title: "Why AI is necessary", img: "demo_assets/fig_importance.png",
+      cap: "A numpy gradient-boosted tree fuses multivariate thresholds and interactions; hold-out AUC " + auc + " / F1 " + f1 + ", clearly above the single-threshold baseline (0.78 / 0.50)." },
+    { title: "From forecast to decision", img: "demo_assets/dashboard.png",
+      cap: "Beyond prediction: picking schedule, expected-value decision (harvest / wait / protect), value closure (expected loss, premium) and weather index insurance." },
+    { title: "Weather index insurance", img: "demo_assets/fig_insurance.png",
+      cap: "An objective climate index triggers automatic payout; 7 of 12 historical years would pay, fair premium about CNY 1,000 per mu, with plot-level pricing." },
+    { title: "Q&A engine (self-built)", img: "demo_assets/chat.png",
+      cap: "Spoken question -> ONNX intent classifier -> grounded generation with a source chain; multi-intent questions, JSON/table consistency, task references and memory; optional DeepSeek polish." },
+    { title: "Ops and alert loop", img: "demo_assets/dashboard.png",
+      cap: "About 15-minute refresh plus self-healing after 20 minutes idle; upstream drift detection; decision_ready gate; signed DingTalk alerts." },
+    { title: "Plot level: new features", img: "demo_assets/terrain.png",
+      cap: "Open the terrain map, click any point to generate elevation, aspect, downscaled Tmin/Tmax, risk R and advice; then ask for a 3-day plan or print a plot report card." },
+    { title: "Terrain map: what you see", img: "demo_assets/terrain.png",
+      cap: "Five layers (compound / frost / heat / drought / terrain only), DEM hillshade, contours, 200 m scale and north arrow; OSM reference parcels; sensor stations." },
+    { title: "Click to generate: fields and algorithm", img: "demo_assets/terrain.png",
+      cap: "Each point returns elevation, slope and aspect; a lapse rate plus cold-pool and aspect correction yields downscaled Tmin/Tmax; the same risk rules produce R, level and one sentence of advice." },
+    { title: "Plot report card", img: "demo_assets/plot_report.png",
+      cap: "Coordinates, elevation and aspect, risk R, downscaled temperatures, a 3-day outlook, advice, plus data version, upstream URL and SHA-256; print or save as PDF." },
+    { title: "Plot-level Q&A", img: "demo_assets/chat.png",
+      cap: "Ask how to manage this plot for the next three days: per-day Tmin, Tmax, rain, R and level, using the same algorithm as single-day answers, with plot context in the source chain." },
+    { title: "Multi-station sensors", img: "demo_assets/dashboard.png",
+      cap: "Register any station via POST /api/station and report via POST /api/sensor; optional device key, HMAC signature and nonce; stations appear on the map." },
+    { title: "Traceability and freshness", img: "demo_assets/mobile.png",
+      cap: "Self-healing refresh after 20 minutes idle; every data version records upstream URL, parameters and full SHA-256; the source chain includes plot context; /api/ready exposes decision_ready." },
+    { title: "Crowdsourced phenology", img: "demo_assets/report.png",
+      cap: "Farmers report harvest dates and damage; thresholds are recalculated automatically, forming a data flywheel." },
+    { title: "Remote sensing", img: "demo_assets/fig_ndvi_temp.png",
+      cap: "NASA GIBS MODIS NDVI and Sentinel-2 scenes provide growth context." },
+    { title: "Ground truth: station cross-check", img: "demo_assets/fig_station.png",
+      cap: "Meteostat Hangzhou: 4,303 days of observations; correlation 0.98 to 0.99; the bias reflects the valley microclimate." },
+    { title: "Historical events", img: "demo_assets/fig_backtest.png",
+      cap: "2016 cold wave, 2018 freeze, 2020/2022/2024 heat, 2024 spring frost, 2025 late frost: 7 of 7 events detected." },
+    { title: "Mobile and offline", img: "demo_assets/mobile.png",
+      cap: "Responsive on phones; a single offline page opens with a double click, for field use." },
+    { hero: true, title: "ONE PLACE · ONE CLIMATE PROBLEM · ONE AI SOLUTION",
+      sub: "TeaWindow: bringing AI into a real tea garden",
+      kpis: ["https://teawindow.onrender.com", "https://eric2007-sudo.github.io/TeaWindow/"] },
+  ];
+
+  const slides = (new URLSearchParams(location.search).get("lang") === "en") ? slidesEN : slidesCN;
 
   const stage = document.getElementById("stage");
   const bar = document.getElementById("bar");
