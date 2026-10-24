@@ -16,7 +16,7 @@
 | # | 文件 | 大小 | 说明 |
 |---|---|---:|---|
 | 01 | `01_TeaWindow_Pitch_EN.pptx` | 1.40 MB | 英文 PPT（14 页：12 + 团队页 + 架构页） |
-| 01 | `01_TeaWindow_Pitch_EN.pdf` | 0.84 MB | 英文 PDF（微信可直接预览） |
+| 01 | `01_TeaWindow_Pitch_EN.pdf` | 0.85 MB | 英文 PDF（微信可直接预览） |
 | 02 | `02_TeaWindow_Pitch_CN.pptx` | 1.47 MB | 中文 PPT（14 页：12 + 团队页 + 架构页） |
 | 02 | `02_TeaWindow_Pitch_CN.pdf` | 1.10 MB | 中文 PDF（微信可直接预览） |
 | 03 | `03_TeaWindow_Demo_EN.mp4` | 0.92 MB | 英文演示视频（2:48，30fps） |
